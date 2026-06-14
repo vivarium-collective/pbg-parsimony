@@ -20,15 +20,21 @@ from pbg_parsimony.recipe import object_block, author_recipe, build_pipeline
 class Ingredient:
     """One molecular species to place. ``id`` is the unique key (becomes the
     recipe object key and the pack ingredient ``name``); ``region`` is
-    ``interior`` | ``surface`` | ``fiber``."""
+    ``interior`` | ``surface`` | ``fiber``.
+
+    Provide a ``structure`` (meshed to a VdW surface) OR a ``sphere_radius``
+    (a cheap sphere proxy, e.g. for membrane lipids). ``principal_vector``
+    orients surface ingredients to the membrane normal."""
     id: str
     count: int
-    structure: StructureRef
+    structure: StructureRef | None = None
+    sphere_radius: float | None = None
     color: tuple = (0.6, 0.6, 0.6)
     region: str = "interior"
     display_name: str = ""
     category: str = ""
     proxy_voxel_size: float | None = None
+    principal_vector: tuple | None = None
     lod_count: int = 4
 
 
@@ -88,11 +94,18 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         return True
 
     for ing in ingredients:
-        try:
-            if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count):
-                print(f"  skip {ing.id}: no LODs"); continue
-        except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
-            print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue
+        if ing.structure is None and ing.sphere_radius is not None:
+            obj = {"type": "single_sphere", "radius": float(ing.sphere_radius),
+                   "color": [float(c) for c in ing.color]}
+            if ing.principal_vector is not None:
+                obj["principal_vector"] = list(ing.principal_vector)
+            objects[ing.id] = obj
+        else:
+            try:
+                if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count):
+                    print(f"  skip {ing.id}: no LODs"); continue
+            except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
+                print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue
         cnt = max(1, int(ing.count * scale))
         sidecar[ing.id] = {"display_name": ing.display_name or ing.id,
                            "category": ing.category, "count": cnt}

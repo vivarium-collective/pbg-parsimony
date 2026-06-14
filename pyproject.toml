@@ -17,7 +17,13 @@ dependencies = [
 dev = ["pytest>=7"]
 
 [tool.setuptools]
-packages = ["pbg_parsimony"]
+packages = ["pbg_parsimony", "pbg_parsimony.composites"]
+
+[tool.setuptools.package-data]
+pbg_parsimony = ["viewer/*", "composites/*.yaml"]
+
+[project.scripts]
+pbg-parsimony-demo = "pbg_parsimony.demo:main"
 
 [tool.uv.sources]
 process-bigraph = { git = "https://github.com/vivarium-collective/process-bigraph.git", branch = "main" }
