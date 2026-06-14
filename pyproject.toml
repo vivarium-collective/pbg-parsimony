@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pbg-parsimony"
+version = "0.1.0"
+description = "Reusable process-bigraph packing of 3D whole-cell structural models (parsimony engine wrapper)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "process-bigraph>=0.0.38",
+    "bigraph-schema>=0.0.60",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["pbg_parsimony"]
+
+[tool.uv.sources]
+process-bigraph = { git = "https://github.com/vivarium-collective/process-bigraph.git", branch = "main" }
+bigraph-schema = { git = "https://github.com/vivarium-collective/bigraph-schema.git", branch = "main" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
