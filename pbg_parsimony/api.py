@@ -83,14 +83,14 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     objects, interior, surface, fiber, sidecar = {}, [], [], [], {}
     surface_ids = []
 
-    def add_mesh(obj_id, ref, color, proxy=None, lod_count=4):
+    def add_mesh(obj_id, ref, color, proxy=None, lod_count=4, principal_vector=None):
         path = fetch(ref, struct_cache, slug=obj_id)
         stem = mesh_file(path, mesh_dir)
         lods = [f"meshes/{stem}.lod{i}.obj" for i in range(lod_count)
                 if (mesh_dir / f"{stem}.lod{i}.obj").exists()]
         if not lods:
             return False
-        objects[obj_id] = object_block(color, lods, proxy)
+        objects[obj_id] = object_block(color, lods, proxy, principal_vector)
         return True
 
     for ing in ingredients:
@@ -102,7 +102,8 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             objects[ing.id] = obj
         else:
             try:
-                if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count):
+                if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count,
+                                ing.principal_vector):
                     print(f"  skip {ing.id}: no LODs"); continue
             except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
                 print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue

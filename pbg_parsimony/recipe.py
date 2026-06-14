@@ -4,8 +4,10 @@ from __future__ import annotations
 LOD_VOXELS = [16.0, 8.0, 4.0, 2.5]
 
 
-def object_block(color, lod_paths, proxy_voxel_size=None):
-    """A mesh ingredient object for the recipe ``objects`` map."""
+def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None):
+    """A mesh ingredient object for the recipe ``objects`` map. ``principal_vector``
+    (a local axis) is aligned to the surface normal by the engine during surface
+    placement — e.g. a flagellum's whip axis pointing outward from the envelope."""
     o = {
         "type": "mesh",
         "color": [float(c) for c in color],
@@ -14,6 +16,8 @@ def object_block(color, lod_paths, proxy_voxel_size=None):
     }
     if proxy_voxel_size:
         o["proxy_voxel_size"] = float(proxy_voxel_size)
+    if principal_vector is not None:
+        o["principal_vector"] = [float(v) for v in principal_vector]
     return o
 
 
