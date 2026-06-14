@@ -36,6 +36,9 @@ class Ingredient:
     proxy_voxel_size: float | None = None
     principal_vector: tuple | None = None
     lod_count: int = 4
+    pack_first: bool = False  # interior: pack in an early stage (before the small
+    #                           molecules fragment the space) so large assemblies
+    #                           reach their true count instead of being squeezed out.
 
 
 @dataclass
@@ -81,6 +84,7 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     struct_cache = out_dir / "structures"
     mesh_dir = out_dir / "meshes"
     objects, interior, surface, fiber, sidecar = {}, [], [], [], {}
+    big_ids = []  # interior ingredients to pack first (pack_first=True)
     surface_ids = []
 
     def add_mesh(obj_id, ref, color, proxy=None, lod_count=4, principal_vector=None):
@@ -117,6 +121,8 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             fiber.append(directive)
         else:
             interior.append(directive)
+            if ing.pack_first:
+                big_ids.append(ing.id)
 
     chrom_block = None
     if chromosome is not None:
@@ -144,7 +150,7 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     recipe_path.write_text(json.dumps(recipe, indent=2))
     pipeline = build_pipeline(name, f"{name}.json", surface_ids=surface_ids,
                               has_chromosome=chrom_block is not None,
-                              has_fiber_proteins=bool(fiber))
+                              has_fiber_proteins=bool(fiber), big_ids=big_ids)
     pipeline_path = out_dir / f"{name}.pipeline.json"
     pipeline_path.write_text(json.dumps(pipeline, indent=2))
     sidecar_path = out_dir / f"{name}.meta.json"

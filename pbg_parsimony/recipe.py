@@ -45,9 +45,16 @@ def author_recipe(name, objects, interior, surface, capsule, chromosome=None, bb
 
 
 def build_pipeline(name, recipe_rel, *, surface_ids, has_chromosome, has_fiber_proteins,
-                   backend="octree", clearance_cell_size=40):
+                   backend="octree", clearance_cell_size=40, big_ids=None):
     """Staged octree pipeline: chromosome → membrane (surface) → fiber proteins →
-    densified interior."""
+    big interior assemblies → densified interior.
+
+    ``big_ids`` are large interior assemblies (ribosome, chaperonin, …) packed in
+    an EARLY stage, before the flood of small molecules fragments the space — so
+    they reach their true abundance instead of being squeezed out (a combined
+    interior stage saturates a 70S ribosome at ~561 of 20,000; packed first it
+    reaches the full 20,000)."""
+    big_ids = list(big_ids or [])
     stages = []
     deps_for_interior = []
     if has_chromosome:
@@ -59,8 +66,14 @@ def build_pipeline(name, recipe_rel, *, surface_ids, has_chromosome, has_fiber_p
     if has_chromosome and has_fiber_proteins:
         stages.append({"id": "fiber_proteins", "kind": "fiber_pack", "depends_on": ["chromosome"]})
         deps_for_interior.append("fiber_proteins")
+    if big_ids:
+        big_stage = {"id": "big", "kind": "pack", "include": big_ids, "exclude": [], "densify": True}
+        if deps_for_interior:
+            big_stage["depends_on"] = list(deps_for_interior)
+        stages.append(big_stage)
+        deps_for_interior.append("big")
     interior_stage = {"id": "interior", "kind": "pack", "include": [],
-                      "exclude": list(surface_ids), "densify": True,
+                      "exclude": list(surface_ids) + big_ids, "densify": True,
                       "clearance_cell_size": clearance_cell_size}
     if deps_for_interior:
         interior_stage["depends_on"] = deps_for_interior
