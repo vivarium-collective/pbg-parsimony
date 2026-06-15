@@ -1399,7 +1399,7 @@ let lodVoxelPixelTarget = 4.0;
 // at 3 px they ALL route to meshes (no culling, mass OBJ loads) and the
 // view becomes unnavigable. Default to a higher budget so distant
 // instances stay cheap proxies; the "Mesh @px" slider tunes it.
-let lodSphereBudgetPx = 12.0;
+let lodSphereBudgetPx = 6.0;
 
 // Fraction of each ingredient's instances actually drawn — a viz-only
 // subsample (the pack order is random, so a prefix is a uniform random
