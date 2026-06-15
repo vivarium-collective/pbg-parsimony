@@ -16,6 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { initVR } from "./vr.js?v=19";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -48,6 +49,7 @@ camera.position.set(150, 120, 200);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.localClippingEnabled = true;
+renderer.xr.enabled = true;   // WebXR ("View in VR") — see vr.js
 canvasWrap.appendChild(renderer.domElement);
 
 // Style + outline state. Declared here so the composer setup below
@@ -1505,7 +1507,11 @@ function refreshFrustum() {
 // total placement count (≈ 27k for mycoplasma_full).
 function reassessLODs() {
   refreshFrustum();
-  const camPos = camera.position;
+  // In VR the active camera is the headset rig (renderer.xr.getCamera()); use
+  // its world position so LOD/frustum picking tracks where the user actually is.
+  const camPos = renderer.xr.isPresenting
+    ? renderer.xr.getCamera().getWorldPosition(new THREE.Vector3())
+    : camera.position;
   const vh = renderer.domElement.clientHeight || 1;
   const fovHalfTan = Math.tan((camera.fov * Math.PI / 180) / 2);
   const camX = camPos.x, camY = camPos.y, camZ = camPos.z;
@@ -2718,24 +2724,30 @@ function tick() {
   // cause a one-shot ten-frames-worth of motion that feels like a jerk.
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
-  if (autoSpin) {
-    controls.target;
-    const target = controls.target;
-    const offset = camera.position.clone().sub(target);
-    const ang = dt * 0.25;
-    const cos = Math.cos(ang), sin = Math.sin(ang);
-    const nx = offset.x * cos - offset.z * sin;
-    const nz = offset.x * sin + offset.z * cos;
-    offset.x = nx;
-    offset.z = nz;
-    camera.position.copy(target).add(offset);
-    // OrbitControls only emits "change" on user input, not on our
-    // own camera moves; reassess explicitly so spin keeps the LOD +
-    // frustum partition in sync.
+  if (renderer.xr.isPresenting) {
+    // VR: the headset drives the camera; controllers drive the dolly.
+    if (vrApi) vrApi.updateVR(dt);
     scheduleReassess();
+  } else {
+    if (autoSpin) {
+      controls.target;
+      const target = controls.target;
+      const offset = camera.position.clone().sub(target);
+      const ang = dt * 0.25;
+      const cos = Math.cos(ang), sin = Math.sin(ang);
+      const nx = offset.x * cos - offset.z * sin;
+      const nz = offset.x * sin + offset.z * cos;
+      offset.x = nx;
+      offset.z = nz;
+      camera.position.copy(target).add(offset);
+      // OrbitControls only emits "change" on user input, not on our
+      // own camera moves; reassess explicitly so spin keeps the LOD +
+      // frustum partition in sync.
+      scheduleReassess();
+    }
+    applyKeyboardMotion(dt);
+    controls.update();
   }
-  applyKeyboardMotion(dt);
-  controls.update();
   // The cel shader now provides Goodsell-style silhouette outlines
   // intrinsically (via view-aligned NdotV darkening), so we render
   // directly in both modes. The composer machinery is kept above as
@@ -2754,9 +2766,18 @@ function tick() {
     fpsCount = 0;
     fpsUpdate = now;
   }
-  requestAnimationFrame(tick);
 }
-requestAnimationFrame(tick);
+
+// WebXR "View in VR": enables the #vr-button when a headset is detected and
+// enters/exits immersive-VR. setAnimationLoop (not requestAnimationFrame) is
+// required so the headset can drive the render loop while presenting.
+const vrApi = initVR({
+  renderer, scene, camera,
+  button: document.getElementById("vr-button"),
+  onEnter: () => { controls.enabled = false; if (typeof autoSpin !== "undefined") autoSpin = false; },
+  onExit: () => { controls.enabled = true; scheduleReassess(); },
+});
+renderer.setAnimationLoop(tick);
 
 // ───── recipe dropdown ─────────────────────────────────────────────
 // `data/index.json` lists demo packings staged in `viewer/data/`.
