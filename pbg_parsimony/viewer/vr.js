@@ -89,6 +89,15 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // Frame the cell: drop the camera into the dolly, place the user back from
     // centre looking toward it, scaled so the cell is comfortably sized.
     camera.userData._parentBeforeVR = camera.parent;
+    // The dolly scales the Å-scale world into metres for the headset, so the
+    // cell sits a few metres from the camera in view space. The desktop near/far
+    // (tuned for Å, near ~200) would clip the whole cell inside the near plane →
+    // black. Use metre-scale near/far in VR; restore on exit.
+    camera.userData._nearBeforeVR = camera.near;
+    camera.userData._farBeforeVR = camera.far;
+    camera.near = 0.02;
+    camera.far = 2000;
+    camera.updateProjectionMatrix();
     dolly.scale.setScalar(WORLD_SCALE);
     dolly.position.set(0, 0, START_BACK);
     dolly.rotation.set(0, 0, 0);
@@ -104,6 +113,11 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       const parent = camera.userData._parentBeforeVR || scene;
       parent.add(camera);
       scene.remove(dolly);
+      if (camera.userData._nearBeforeVR != null) {
+        camera.near = camera.userData._nearBeforeVR;
+        camera.far = camera.userData._farBeforeVR;
+        camera.updateProjectionMatrix();
+      }
       setButton("ready", "View in VR", "Enter immersive VR");
       onExit?.();
     });
