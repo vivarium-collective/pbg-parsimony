@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=22";
+import { initVR } from "./vr.js?v=23";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1417,7 +1417,11 @@ const TARGET_DRAWN = 250000;
 // A Meta Quest GPU renders in stereo at 72-90 Hz and is far weaker than a
 // desktop — draw far fewer instances while presenting or it lags out (and the
 // mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
-const VR_TARGET_DRAWN = 40000;
+const VR_TARGET_DRAWN = 25000;
+// In VR every drawn mesh ingredient uses this fixed (coarse) LOD instead of the
+// per-pixel pick — real molecular shapes at controlled GPU cost. 1 = lod1 (8 Å),
+// falling back to lod0 (16 Å) when lod1 is degenerate/missing.
+const VR_LOD_INDEX = 1;
 // Rare types (few copies) are always drawn in full — the global subsample is for
 // the abundant species. Without this, a 30-copy complex like the flagellum would
 // be culled to ~6 at a 20% show fraction.
@@ -1589,7 +1593,11 @@ function reassessLODs() {
       // triangle OBJ for something that's 4 pixels across is wasted
       // GPU bandwidth — the sphere proxy is visually identical at
       // that scale.
-      if (!hasLods || projectedRadiusPx < lodSphereBudgetPx) {
+      // In VR the projected-size heuristic (vh/fov) is unreliable, so it routed
+      // every mesh ingredient to the sphere/ellipsoid fallback ("eggs"). While
+      // presenting, skip the size shortcut so mesh ingredients always load a real
+      // (coarse) LOD; only true sphere ingredients fall through.
+      if (!hasLods || (!isPresentingNow && projectedRadiusPx < lodSphereBudgetPx)) {
         _tmpMat.compose(_tmpPos, _tmpQuat, _tmpScaleOne);
         entry.fallbackSphere.standardMesh.setMatrixAt(sphereCount, _tmpMat);
         entry.fallbackSphere.celMesh.setMatrixAt(sphereCount, _tmpMat);
@@ -1617,6 +1625,18 @@ function reassessLODs() {
       if (desired === -1) {
         for (let i = lods.length - 1; i >= 0; i--) {
           if (!lods[i].degenerate) { desired = i; break; }
+        }
+      }
+      // VR: force a fixed coarse LOD (lod0/lod1 — cheapest real meshes) instead
+      // of the per-pixel pick, to keep the Quest GPU sane while still showing
+      // actual molecular shapes rather than smooth ellipsoids.
+      if (isPresentingNow) {
+        desired = -1;
+        for (let i = Math.min(VR_LOD_INDEX, lods.length - 1); i >= 0; i--) {
+          if (!lods[i].degenerate) { desired = i; break; }
+        }
+        if (desired === -1) {
+          for (let i = 0; i < lods.length; i++) if (!lods[i].degenerate) { desired = i; break; }
         }
       }
 

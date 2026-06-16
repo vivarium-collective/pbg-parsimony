@@ -28,6 +28,7 @@ const FLY_SPEED = 1.2;        // head-metres / second at full stick deflection (
 const SCALE_RATE = 0.6;       // world-scale change / second at full deflection
 const SCALE_MIN = 250;        // clamp world scale so you can't shrink/grow into black
 const SCALE_MAX = 9000;
+const SNAP_ANGLE = Math.PI / 6;  // 30° comfort snap-turn (right stick X)
 const DEADZONE = 0.18;
 
 export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
@@ -133,46 +134,59 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   const _right = new THREE.Vector3();
   const _euler = new THREE.Euler(0, 0, 0, "YXZ");
 
+  // Read a controller thumbstick. Quest reports the stick on axes[2],[3]; some
+  // runtimes use [0],[1] — try the live pair. Returns [x, y] past the deadzone.
   function axesFor(handedness) {
-    for (const src of session?.inputSources || []) {
-      if (src.handedness === handedness && src.gamepad) {
-        const a = src.gamepad.axes;
-        // WebXR standard mapping: thumbstick on axes[2],[3] (touchpad on [0],[1]).
-        const x = a.length >= 4 ? a[2] : a[0] || 0;
-        const y = a.length >= 4 ? a[3] : a[1] || 0;
-        return [Math.abs(x) > DEADZONE ? x : 0, Math.abs(y) > DEADZONE ? y : 0];
-      }
+    for (const src of (session && session.inputSources) || []) {
+      if (src.handedness !== handedness || !src.gamepad) continue;
+      const a = src.gamepad.axes || [];
+      let x = a[2] || 0, y = a[3] || 0;
+      if (Math.abs(x) < DEADZONE && Math.abs(y) < DEADZONE) { x = a[0] || 0; y = a[1] || 0; }
+      return [Math.abs(x) > DEADZONE ? x : 0, Math.abs(y) > DEADZONE ? y : 0];
     }
     return [0, 0];
   }
 
+  const _up = new THREE.Vector3(0, 1, 0);
+  const _q = new THREE.Quaternion();
+  let _snapArmed = false;
+
   function updateVR(dt) {
     if (!renderer.xr.isPresenting || !session) return;
     const xrCam = renderer.xr.getCamera();
+    const head = xrCam.getWorldPosition(new THREE.Vector3());
     // Head yaw, so "forward" tracks where the user looks.
     _euler.setFromQuaternion(xrCam.quaternion);
     const yaw = _euler.y;
     _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     _right.set(Math.cos(yaw), 0, -Math.sin(yaw));
 
-    // Left stick → fly (head-relative, in head-metres → Å via the dolly scale).
+    // LEFT stick → fly (head-relative; head-metres → Å via the dolly scale).
     const [lx, ly] = axesFor("left");
     if (lx || ly) {
       const step = FLY_SPEED * dt * dolly.scale.x;
       dolly.position.addScaledVector(_fwd, -ly * step);
       dolly.position.addScaledVector(_right, lx * step);
     }
-    // Right stick (vertical) → scale the world about the headset, so growing /
-    // shrinking keeps what you're looking at fixed in world space.
-    const [, ry] = axesFor("right");
+
+    const [rx, ry] = axesFor("right");
+    // RIGHT stick X → comfortable snap-turn about the head (rotate your view).
+    if (Math.abs(rx) > 0.6) {
+      if (!_snapArmed) {
+        _snapArmed = true;
+        _q.setFromAxisAngle(_up, rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
+        dolly.position.sub(head).applyQuaternion(_q).add(head);
+        dolly.quaternion.premultiply(_q);
+      }
+    } else if (Math.abs(rx) < 0.3) {
+      _snapArmed = false;
+    }
+    // RIGHT stick Y → scale the world about the head (zoom in/out), clamped so it
+    // can't shrink to a dot or balloon you inside a mesh (both read as black).
     if (ry) {
-      // Clamp the resulting scale so the world can't shrink to a dot or balloon
-      // until you're lost inside a mesh (both read as "blackness").
       const want = dolly.scale.x * Math.exp(-ry * SCALE_RATE * dt);
       const newScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, want));
       const factor = newScale / dolly.scale.x;
-      const head = xrCam.getWorldPosition(new THREE.Vector3());
-      // newPos = head - factor*(head - pos)  ⇒ head stays put as scale changes
       const delta = head.clone().sub(dolly.position);
       dolly.position.copy(head).addScaledVector(delta, -factor);
       dolly.scale.setScalar(newScale);
