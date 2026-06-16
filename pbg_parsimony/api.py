@@ -78,6 +78,8 @@ class Chromosome:
     n_chromosomes: int = 1
     fork_fraction: float = 0.0
     fork_marker: str | None = None
+    oric_marker: str | None = None   # ingredient id seated at each origin (oriC)
+    ter_marker: str | None = None    # ingredient id seated at the terminus (terC)
 
 
 def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = None, *,
@@ -155,6 +157,10 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         }
         if chromosome.fork_marker:
             chrom_block["fork_marker"] = chromosome.fork_marker
+        if chromosome.oric_marker:
+            chrom_block["oric_marker"] = chromosome.oric_marker
+        if chromosome.ter_marker:
+            chrom_block["ter_marker"] = chromosome.ter_marker
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {

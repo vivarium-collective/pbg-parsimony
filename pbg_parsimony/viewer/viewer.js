@@ -1829,12 +1829,13 @@ let collapsedCats = new Set();
 let selectedName = null;     // currently-selected ingredient (info panel + row highlight)
 let selectedHighlight = null; // the black inverted-hull outline mesh for the picked instance
 let selectedAnchor = null;    // world-space point the info box is pinned next to
-const CAT_ORDER = ["Translation", "Transcription", "Nucleoid", "Metabolism",
-                   "Protein folding", "Envelope", "Motility", "Regulation"];
+const CAT_ORDER = ["Replication", "Translation", "Transcription", "Nucleoid",
+                   "Metabolism", "Protein folding", "Envelope", "Motility",
+                   "Regulation"];
 const CAT_COLOR = {
-  "Translation": "#f28c40", "Transcription": "#5a99f2", "Nucleoid": "#d9bf73",
-  "Metabolism": "#73cc80", "Protein folding": "#f2d94d", "Envelope": "#cc8cd9",
-  "Regulation": "#e6667f", "Motility": "#40c7b8",
+  "Replication": "#ff7733", "Translation": "#f28c40", "Transcription": "#5a99f2",
+  "Nucleoid": "#d9bf73", "Metabolism": "#73cc80", "Protein folding": "#f2d94d",
+  "Envelope": "#cc8cd9", "Regulation": "#e6667f", "Motility": "#40c7b8",
 };
 function metaFor(entry) {
   return ingredientMeta[entry.name] || { display_name: entry.name, category: "Other" };
