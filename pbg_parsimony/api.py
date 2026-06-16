@@ -70,6 +70,14 @@ class Chromosome:
     segment_id: str = "dna_segment"
     color: tuple = (0.85, 0.75, 0.45)
     proteins: list = field(default_factory=list)
+    # Replication state. ``n_chromosomes`` copies are laid out, one per cell
+    # sub-region (``beads`` is the count *per* chromosome). ``fork_fraction`` in
+    # (0,1) draws each chromosome as a theta structure — a replication bubble
+    # around oriC pinched at two forks ``fork_fraction`` of the way to terC.
+    # ``fork_marker`` is an ingredient id seated at each fork (the replisome).
+    n_chromosomes: int = 1
+    fork_fraction: float = 0.0
+    fork_marker: str | None = None
 
 
 def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = None, *,
@@ -111,9 +119,14 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
                     print(f"  skip {ing.id}: no LODs"); continue
             except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
                 print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue
-        cnt = max(1, int(ing.count * scale))
+        cnt = max(1, int(ing.count * scale)) if ing.count > 0 else 0
         sidecar[ing.id] = {"display_name": ing.display_name or ing.id,
                            "category": ing.category, "count": cnt}
+        if cnt <= 0:
+            # Marker-only object (e.g. the fork replisome): registered so the
+            # chromosome stage can seat it at the replication forks, but not
+            # placed randomly via a count directive.
+            continue
         directive = {"object": ing.id, "count": cnt}
         if ing.region == "surface":
             surface.append(directive); surface_ids.append(ing.id)
@@ -137,7 +150,11 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             "bead_radius": chromosome.bead_radius, "color": list(chromosome.color),
             "compartment": "cell", "segment": chromosome.segment_id,
             "supercoil": chromosome.supercoil, "proteins": fiber,
+            "n_chromosomes": chromosome.n_chromosomes,
+            "fork_fraction": chromosome.fork_fraction,
         }
+        if chromosome.fork_marker:
+            chrom_block["fork_marker"] = chromosome.fork_marker
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
