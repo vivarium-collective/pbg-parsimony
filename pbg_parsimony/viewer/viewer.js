@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=19";
+import { initVR } from "./vr.js?v=20";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1414,13 +1414,23 @@ let interiorFraction = 1.0;
 // that still reads as a crowded cell. Whole-cell packs (~1M+) are subsampled
 // down to this; smaller packs render in full.
 const TARGET_DRAWN = 250000;
+// A Meta Quest GPU renders in stereo at 72-90 Hz and is far weaker than a
+// desktop — draw far fewer instances while presenting or it lags out (and the
+// mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
+const VR_TARGET_DRAWN = 40000;
 // Rare types (few copies) are always drawn in full — the global subsample is for
 // the abundant species. Without this, a 30-copy complex like the flagellum would
 // be culled to ~6 at a 20% show fraction.
 const ALWAYS_SHOW_MAX = 1000;
+let _packTotalPlacements = 0;
 function applyAdaptiveShowFraction(totalPlacements) {
   if (!totalPlacements) return;
-  let pct = Math.min(100, Math.max(5, Math.round((TARGET_DRAWN / totalPlacements) * 100 / 5) * 5));
+  _packTotalPlacements = totalPlacements;
+  const vr = renderer.xr.isPresenting;
+  const target = vr ? VR_TARGET_DRAWN : TARGET_DRAWN;
+  let pct = (target / totalPlacements) * 100;
+  pct = vr ? Math.min(100, Math.max(1, Math.round(pct)))
+           : Math.min(100, Math.max(5, Math.round(pct / 5) * 5));
   interiorFraction = pct / 100;
   const slider = document.getElementById("show-fraction");
   const val = document.getElementById("show-fraction-value");
@@ -1490,7 +1500,11 @@ function scheduleReassess() {
 // Must happen after `camera.updateProjectionMatrix` and
 // `controls.update` have run for this frame.
 function refreshFrustum() {
-  _tmpProjView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  // In VR the headset drives the view; cull against the XR camera (a combined
+  // both-eyes culling frustum that follows the head) — not the frozen desktop
+  // camera, which would cull everything you turn to look at (black void).
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  _tmpProjView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
   _tmpFrustum.setFromProjectionMatrix(_tmpProjView);
 }
 
@@ -2774,8 +2788,16 @@ function tick() {
 const vrApi = initVR({
   renderer, scene, camera,
   button: document.getElementById("vr-button"),
-  onEnter: () => { controls.enabled = false; if (typeof autoSpin !== "undefined") autoSpin = false; },
-  onExit: () => { controls.enabled = true; scheduleReassess(); },
+  onEnter: () => {
+    controls.enabled = false; if (typeof autoSpin !== "undefined") autoSpin = false;
+    applyAdaptiveShowFraction(_packTotalPlacements); // drop to the VR draw budget
+    scheduleReassess();
+  },
+  onExit: () => {
+    controls.enabled = true;
+    applyAdaptiveShowFraction(_packTotalPlacements); // restore desktop budget
+    scheduleReassess();
+  },
 });
 renderer.setAnimationLoop(tick);
 

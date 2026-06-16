@@ -24,9 +24,11 @@ import * as THREE from "three";
 // ~13 m room-sized object with sensible stereo depth; the right stick tunes it.
 const WORLD_SCALE = 1500;
 const START_BACK = 16000;     // Å the player starts back from cell centre (z+)
-const FLY_SPEED = 3.0;        // head-metres / second at full stick deflection
-const SCALE_RATE = 1.2;       // world-scale change / second at full deflection
-const DEADZONE = 0.15;
+const FLY_SPEED = 1.2;        // head-metres / second at full stick deflection (gentle)
+const SCALE_RATE = 0.6;       // world-scale change / second at full deflection
+const SCALE_MIN = 250;        // clamp world scale so you can't shrink/grow into black
+const SCALE_MAX = 9000;
+const DEADZONE = 0.18;
 
 export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   renderer.xr.enabled = true;
@@ -150,12 +152,16 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // shrinking keeps what you're looking at fixed in world space.
     const [, ry] = axesFor("right");
     if (ry) {
-      const factor = Math.exp(-ry * SCALE_RATE * dt);
+      // Clamp the resulting scale so the world can't shrink to a dot or balloon
+      // until you're lost inside a mesh (both read as "blackness").
+      const want = dolly.scale.x * Math.exp(-ry * SCALE_RATE * dt);
+      const newScale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, want));
+      const factor = newScale / dolly.scale.x;
       const head = xrCam.getWorldPosition(new THREE.Vector3());
       // newPos = head - factor*(head - pos)  ⇒ head stays put as scale changes
       const delta = head.clone().sub(dolly.position);
       dolly.position.copy(head).addScaledVector(delta, -factor);
-      dolly.scale.multiplyScalar(factor);
+      dolly.scale.setScalar(newScale);
     }
   }
 
