@@ -124,7 +124,7 @@ try {
     // but flat faces aren't crushed to black; threshold is a per-frag
     // depth-gradient cutoff (units are world-Å per pixel after the
     // centre-depth normalisation in the fragment shader).
-    outlineStrength: { value: 0.7 },
+    outlineStrength: { value: 0.85 },
     edgeThreshold: { value: 4.0 },
   },
   vertexShader: `
@@ -382,21 +382,20 @@ void main() {
   vec3 N = normalize(vNormalW);
   vec3 V = normalize(cameraPosition - vWorldPos);
   float NdotL = dot(N, normalize(uLightDir));
-  // Wide-smoothstep gradient — Goodsell's illustrations are
-  // painterly, not flat-cel, so this gradient matches the source
-  // aesthetic better than a stark step function while also hiding
-  // the triangle facets of a coarse sphere.
-  float band = mix(0.45, 1.0, smoothstep(-0.4, 0.6, NdotL));
-  // View-aligned silhouette: when the surface normal is nearly
-  // perpendicular to the view direction (NdotV ≈ 0), we're at a
-  // silhouette edge — fade toward black. This produces "ink line"
-  // outlines without any depth-buffer post-pass, so it works at any
-  // scale and isn't subject to the Sobel false-positive blowups the
-  // depth-Sobel approach hit on dense scenes.
+  // Flat two-tone fill — Goodsell's molecules read as flat painted shapes: a
+  // bright lit tone and a slightly darker shadow tone with a soft (watercolour)
+  // terminator, not a smooth 3D gradient. Keep it bright + saturated.
+  float lit = smoothstep(-0.25, 0.25, NdotL);
+  float band = mix(0.74, 1.0, lit);
+  vec3 fill = uColor * band;
+  // Crisp dark ink outline at the silhouette (surface normal ⟂ view). A
+  // colour-tinted near-black, blended in over a narrow rim so every molecule
+  // gets a bold uniform-ish outline like the illustrations. Works at any scale
+  // (the depth-Sobel post-pass adds outlines between stacked molecules too).
   float NdotV = abs(dot(N, V));
-  float silhouette = smoothstep(0.0, 0.25, NdotV);
-  vec3 baseColor = uColor * band;
-  gl_FragColor = vec4(baseColor * silhouette, 1.0);
+  float rim = smoothstep(0.14, 0.34, NdotV);   // 1 = interior, 0 = silhouette rim
+  vec3 ink = uColor * 0.10;                     // near-black, tinted by the colour
+  gl_FragColor = vec4(mix(ink, fill, rim), 1.0);
 }
 `;
 
