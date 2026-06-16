@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=21";
+import { initVR } from "./vr.js?v=22";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1521,6 +1521,7 @@ function refreshFrustum() {
 // total placement count (≈ 27k for mycoplasma_full).
 function reassessLODs() {
   refreshFrustum();
+  const isPresentingNow = renderer.xr.isPresenting;
   // In VR the active camera is the headset rig (renderer.xr.getCamera()); use
   // its world position so LOD/frustum picking tracks where the user actually is.
   const camPos = renderer.xr.isPresenting
@@ -1565,7 +1566,10 @@ function reassessLODs() {
       const px = p.position[0], py = p.position[1], pz = p.position[2];
       _tmpSphere.center.set(px, py, pz);
       _tmpSphere.radius = sphereR;
-      if (!_tmpFrustum.intersectsSphere(_tmpSphere)) continue;
+      // Skip frustum culling while presenting in VR: the XR culling frustum
+      // isn't reliably valid at reassess time, and culling everything leaves a
+      // black void. The VR draw budget already caps the instance count.
+      if (!isPresentingNow && !_tmpFrustum.intersectsSphere(_tmpSphere)) continue;
 
       const dx = px - camX, dy = py - camY, dz = pz - camZ;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
