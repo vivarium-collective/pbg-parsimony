@@ -2763,9 +2763,12 @@ function tick() {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
   if (renderer.xr.isPresenting) {
-    // VR: the headset drives the camera; controllers drive the dolly.
+    // VR: the headset drives the camera; controllers drive the dolly. Molecules
+    // are static in world space (moving/zooming moves the camera, not them), so
+    // we do NOT reassess every frame — that re-walked the whole drawn set each
+    // frame and stuttered. reassess runs once on enter + as each mesh finishes
+    // loading (loadLevel → scheduleReassess), which is enough.
     if (vrApi) vrApi.updateVR(dt);
-    scheduleReassess();
   } else {
     if (autoSpin) {
       controls.target;
