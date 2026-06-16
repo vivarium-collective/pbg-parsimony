@@ -21,10 +21,15 @@ def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None)
     return o
 
 
-def author_recipe(name, objects, interior, surface, capsule, chromosome=None, bbox_pad=1.2):
+def author_recipe(name, objects, interior, surface, capsule, chromosome=None,
+                  bbox_pad=1.2, cell_compartment=None):
     """Assemble a ``2.1-parsimony`` recipe dict. ``capsule`` is
-    ``{"half_len","radius"}`` (Å); ``chromosome`` is a recipe chromosome block."""
+    ``{"half_len","radius"}`` (Å); ``chromosome`` is a recipe chromosome block.
+    ``cell_compartment`` overrides the default capsule compartment (e.g. a
+    ``{"kind":"mesh","mesh_path":...}`` constricted-cell mesh for a septum)."""
     half, r = float(capsule["half_len"]), float(capsule["radius"])
+    comp = cell_compartment or {
+        "kind": "capsule", "a": [-half, 0, 0], "b": [half, 0, 0], "radius": r}
     recipe = {
         "name": name, "version": "0.1.0", "format_version": "2.1-parsimony",
         "description": "Packed by pbg-parsimony.",
@@ -34,7 +39,7 @@ def author_recipe(name, objects, interior, surface, capsule, chromosome=None, bb
         "composition": {
             "space": {"regions": {"interior": ["cell"]}},
             "cell": {
-                "compartment": {"kind": "capsule", "a": [-half, 0, 0], "b": [half, 0, 0], "radius": r},
+                "compartment": comp,
                 "regions": {"interior": interior, "surface": surface},
             },
         },

@@ -83,7 +83,8 @@ class Chromosome:
 
 
 def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = None, *,
-               out_dir, name: str = "model", scale: float = 1.0, proxy_lod: int = 2) -> dict:
+               out_dir, name: str = "model", scale: float = 1.0, proxy_lod: int = 2,
+               cell_mesh=None) -> dict:
     """Resolve + mesh structures, author the recipe, and pack the cell.
 
     Returns ``{pack_path, sidecar_path, recipe_path, pipeline_path, n_placed,
@@ -167,8 +168,19 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             "display_name": "Chromosomal DNA (B-form duplex)",
             "category": "Nucleoid", "count": chromosome.beads}
 
+    # Optional constricted-cell mesh (a dividing-cell septum): write it next to
+    # the recipe and point the cell compartment at it instead of the capsule.
+    cell_compartment = None
+    if cell_mesh is not None:
+        verts, faces = cell_mesh
+        obj_lines = [f"v {x:.2f} {y:.2f} {z:.2f}" for (x, y, z) in verts]
+        obj_lines += [f"f {a + 1} {b + 1} {c + 1}" for (a, b, c) in faces]
+        (out_dir / "cell.obj").write_text("\n".join(obj_lines) + "\n")
+        cell_compartment = {"kind": "mesh", "mesh_path": "cell.obj"}
+
     recipe = author_recipe(name, objects, interior, surface,
-                           {"half_len": capsule.half_len, "radius": capsule.radius}, chrom_block)
+                           {"half_len": capsule.half_len, "radius": capsule.radius},
+                           chrom_block, cell_compartment=cell_compartment)
     recipe_path = out_dir / f"{name}.json"
     recipe_path.write_text(json.dumps(recipe, indent=2))
     pipeline = build_pipeline(name, f"{name}.json", surface_ids=surface_ids,
