@@ -2868,13 +2868,11 @@ demoPicker.addEventListener("change", () => {
   if (collapseAll) collapseAll.addEventListener("click", () => { collapseAllCats(); });
 }
 
-// Load the ingredient-metadata sidecar (display names + categories), then the
-// pack. The pack path is configurable: window.PARSIMONY_PACK, then ?file=,
-// then a default. The sidecar is the pack path with .pack.json → .meta.json.
-(async () => {
-  const params = new URLSearchParams(window.location.search);
-  const file = window.PARSIMONY_PACK || params.get("file") || "data/demo.pack.json";
+// Load a model = its ingredient-metadata sidecar (display names + categories)
+// then the pack. The sidecar is the pack path with .pack.json → .meta.json.
+async function loadModel(file) {
   const metaFile = file.replace(/\.pack\.json$/, ".meta.json");
+  ingredientMeta = {};
   try {
     const r = await fetch(metaFile);
     if (r.ok) { const j = await r.json(); ingredientMeta = j.ingredients || {}; }
@@ -2882,4 +2880,38 @@ demoPicker.addEventListener("change", () => {
     console.warn("ingredient metadata sidecar not found:", e);
   }
   await loadByPath(file);
+}
+
+// Pack/model selection. A switchable multi-model viewer is driven by either
+// window.PARSIMONY_MODELS = [{name, file}, …] or ?models=<manifest-url> (a JSON
+// array of the same). The #model-picker then lets you switch models in-viewer
+// (one dashboard window, many models). Falls back to a single pack via
+// window.PARSIMONY_PACK / ?file= / a default demo.
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  let models = Array.isArray(window.PARSIMONY_MODELS) ? window.PARSIMONY_MODELS : null;
+  const manifestUrl = params.get("models");
+  if (!models && manifestUrl) {
+    try {
+      const r = await fetch(manifestUrl);
+      if (r.ok) models = await r.json();
+    } catch (e) { console.warn("models manifest not found:", e); }
+  }
+  const single = window.PARSIMONY_PACK || params.get("file");
+  const picker = document.getElementById("model-picker");
+  if (models && models.length && picker) {
+    picker.innerHTML = "";
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m.file; o.textContent = m.name || m.file.split("/").pop();
+      picker.appendChild(o);
+    }
+    picker.hidden = false;
+    picker.addEventListener("change", () => loadModel(picker.value));
+    const initial = (single && models.some(m => m.file === single)) ? single : models[0].file;
+    picker.value = initial;
+    await loadModel(initial);
+  } else {
+    await loadModel(single || "data/demo.pack.json");
+  }
 })();

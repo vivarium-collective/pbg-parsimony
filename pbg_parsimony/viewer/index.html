@@ -67,6 +67,8 @@
     button:hover { border-color: var(--accent); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     button:disabled:hover { border-color: var(--border); }
+    #model-picker { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    #model-picker:hover { border-color: var(--accent); }
     #vr-button[data-vr-state="ready"], #vr-button[data-vr-state="active"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
     #canvas-wrap { grid-area: canvas; position: relative; overflow: hidden; }
     canvas { display: block; outline: none; }
@@ -240,6 +242,7 @@
     <header>
       <h1>parsimony<span class="sub">interactive 3D molecular packing</span></h1>
       <div style="flex:1"></div>
+      <select id="model-picker" hidden title="switch model"></select>
       <button id="about-btn" title="how this model was made">ⓘ about</button>
       <button id="reset-view">reset view</button>
       <button id="vr-button" disabled title="Checking for a headset…">View in VR</button>
@@ -327,6 +330,6 @@
     </footer>
   </div>
 
-  <script type="module" src="./viewer.js?v=24"></script>
+  <script type="module" src="./viewer.js?v=25"></script>
 </body>
 </html>
