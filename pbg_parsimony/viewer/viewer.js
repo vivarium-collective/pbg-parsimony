@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=42";
+import { initVR } from "./vr.js?v=43";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1505,9 +1505,15 @@ if (IS_MOBILE) lodSphereBudgetPx = 6.0;
 const VR_TARGET_DRAWN = 15000;  // lowered from 25k — headroom so the Quest can't
                                 // GPU-lock (a lockup freezes even the Meta button)
 // In VR every drawn mesh ingredient uses this fixed (coarse) LOD instead of the
-// per-pixel pick — real molecular shapes at controlled GPU cost. 1 = lod1 (8 Å),
-// falling back to lod0 (16 Å) when lod1 is degenerate/missing.
-const VR_LOD_INDEX = 1;
+// per-pixel pick — real molecular shapes at controlled GPU cost. 0 = lod0 (16 Å,
+// the coarsest/cheapest real mesh) so the most molecules fit under the triangle
+// budget below; falls back to a finer level only if lod0 is degenerate/missing.
+const VR_LOD_INDEX = 0;
+// Hard cap on triangles submitted per frame while presenting in VR. The scene is
+// drawn once per eye, so the GPU processes ~2× this. 600k → ~1.2M GPU triangles,
+// comfortable headroom on a Quest 2 so it cannot lock up. Bigger molecules claim
+// it first (see reassessLODs); the remainder render as cheap sphere proxies.
+const VR_TRIANGLE_BUDGET = 600000;
 // Rare types (few copies) are always drawn in full — the global subsample is for
 // the abundant species. Without this, a 30-copy complex like the flagellum would
 // be culled to ~6 at a 20% show fraction.
@@ -1624,7 +1630,17 @@ function reassessLODs() {
   meshLoadingTotal = 0;
   meshLoadingDone = 0;
 
-  for (const entry of instancedMeshes) {
+  // VR safety: a hard per-frame triangle budget so the Quest GPU can never be
+  // handed more geometry than it can draw (an overload locks the GPU and freezes
+  // even the Meta button → forced restart). Draw the biggest molecules as real
+  // meshes first — they read as shapes; once the budget is spent the rest fall
+  // back to cheap sphere proxies. No effect outside VR (budget = Infinity).
+  let vrTriBudget = isPresentingNow ? VR_TRIANGLE_BUDGET : Infinity;
+  const order = isPresentingNow
+    ? [...instancedMeshes].sort((a, b) => (b.enclosingRadius || 0) - (a.enclosingRadius || 0))
+    : instancedMeshes;
+
+  for (const entry of order) {
     if (entry.lods) {
       meshLoadingTotal += entry.lods.length;
       for (const lvl of entry.lods) if (lvl.loaded) meshLoadingDone++;
@@ -1755,6 +1771,23 @@ function reassessLODs() {
         sphereCount++;
       } else {
         const lvl = lods[actual];
+        // VR triangle budget: if drawing this mesh would blow the per-frame cap,
+        // draw a cheap sphere instead. triCount is memoised per LOD.
+        if (isPresentingNow) {
+          if (lvl.triCount == null) {
+            const g = lvl.standardMesh.geometry;
+            lvl.triCount = g.index ? g.index.count / 3
+                                   : g.attributes.position.count / 3;
+          }
+          if (vrTriBudget - lvl.triCount < 0) {
+            _tmpMat.compose(_tmpPos, _tmpQuat, _tmpScaleOne);
+            entry.fallbackSphere.standardMesh.setMatrixAt(sphereCount, _tmpMat);
+            entry.fallbackSphere.celMesh.setMatrixAt(sphereCount, _tmpMat);
+            sphereCount++;
+            continue;
+          }
+          vrTriBudget -= lvl.triCount;
+        }
         // geomScale brings every LOD's bounding extent to the canonical
         // enclosing_radius so LOD-to-LOD pop-ins don't change size.
         _tmpScaleVec.setScalar(lvl.geomScale);
