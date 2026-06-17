@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=23";
+import { initVR } from "./vr.js?v=38";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1574,7 +1574,14 @@ function updateSizeFilterLabel() {
 }
 
 let reassessQueued = false;
+// While the user is actively grabbing/scaling the world in VR, a reassess pass
+// (which rewrites every drawn instance matrix) lands as a visible hitch mid-
+// motion — "like it's re-rendering". Defer any reassess requested during a grab
+// and flush it once the grab releases.
+let _vrInteracting = false;
+let _reassessPending = false;
 function scheduleReassess() {
+  if (_vrInteracting) { _reassessPending = true; return; }
   if (reassessQueued) return;
   reassessQueued = true;
   // Debounce to next animation frame so a flurry of OrbitControls
@@ -3019,7 +3026,9 @@ function tick() {
     // we do NOT reassess every frame — that re-walked the whole drawn set each
     // frame and stuttered. reassess runs once on enter + as each mesh finishes
     // loading (loadLevel → scheduleReassess), which is enough.
-    if (vrApi) vrApi.updateVR(dt);
+    _vrInteracting = vrApi ? !!vrApi.updateVR(dt) : false;
+    // Flush any reassess that was deferred during a grab, now that it released.
+    if (!_vrInteracting && _reassessPending) { _reassessPending = false; scheduleReassess(); }
   } else {
     if (autoSpin) {
       controls.target;

@@ -10,9 +10,12 @@
 //     Ångström coordinates (~20,000 Å across) while WebXR head-tracking is in
 //     metres, so we scale + place the dolly to present the cell at a comfortable
 //     size and let head movement explore it.
-//   • Controller thumbstick locomotion: left stick flies (head-relative),
-//     right stick (up/down) scales the world so you can shrink down and fly
-//     *inside* the cytoplasm, or grow back out to see the whole cell.
+//   • Grab navigation (primary): hold grip or trigger and move your hand to
+//     drag the whole world — pull a controller toward you to reel the cell in.
+//     Grab with both hands and pull them apart to scale the cell up until you
+//     are standing inside the cytoplasm (push together to shrink back out).
+//   • Controller thumbstick locomotion (secondary): left stick flies (head-
+//     relative), right stick X snap-turns, right stick Y scales the world.
 //
 // The desktop OrbitControls / keyboard path is suspended for the duration of an
 // XR session and restored on exit.
@@ -26,7 +29,8 @@ const WORLD_SCALE = 1500;
 const START_BACK = 16000;     // Å the player starts back from cell centre (z+)
 const FLY_SPEED = 1.2;        // head-metres / second at full stick deflection (gentle)
 const SCALE_RATE = 0.6;       // world-scale change / second at full deflection
-const SCALE_MIN = 250;        // clamp world scale so you can't shrink/grow into black
+const SCALE_MIN = 150;        // clamp world scale so you can't shrink/grow into black
+                             // (lower = cell can grow bigger → deeper "inside")
 const SCALE_MAX = 9000;
 const SNAP_ANGLE = Math.PI / 6;  // 30° comfort snap-turn (right stick X)
 const DEADZONE = 0.18;
@@ -41,7 +45,13 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   dolly.name = "vr-dolly";
 
   const controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
-  for (const c of controllers) dolly.add(c);
+  for (const c of controllers) {
+    // Stash the live XRInputSource so we can read its gamepad buttons (grip /
+    // trigger = "grab") and handedness each frame.
+    c.addEventListener("connected", (e) => { c.userData.inputSource = e.data; });
+    c.addEventListener("disconnected", () => { c.userData.inputSource = null; });
+    dolly.add(c);
+  }
 
   // ── support detection → button state ──────────────────────────────────────
   function setButton(state, label, title) {
@@ -151,8 +161,102 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   const _q = new THREE.Quaternion();
   let _snapArmed = false;
 
+  // ── grab-to-move / pinch-to-scale ─────────────────────────────────────────
+  // Hold grip (or trigger) and move your hand to drag the whole world: pull a
+  // controller toward you and the cell comes with it. Grab with BOTH hands and
+  // change the spread between them to scale — pull your hands apart and the cell
+  // grows around you until you're standing inside the cytoplasm.
+  const _gPrev = new THREE.Vector3();    // last hand pos (dolly-local), 1-hand drag
+  const _gMid = new THREE.Vector3();     // 2-hand midpoint (dolly-local)
+  const _gPrevMid = new THREE.Vector3();
+  const _gDelta = new THREE.Vector3();
+  const _gShift = new THREE.Vector3();
+  let _grabMode = 0;                      // 0 none, 1 one-hand, 2 two-hand
+  let _grabHand = null;                   // the controller doing a 1-hand drag
+  let _gPrevDist = 0;                     // last inter-hand distance (2-hand)
+
+  function isGrabbing(ctrl) {
+    const gp = ctrl.userData.inputSource && ctrl.userData.inputSource.gamepad;
+    if (!gp || !gp.buttons) return false;
+    const grip = gp.buttons[1] && gp.buttons[1].pressed;   // squeeze / grip
+    const trig = gp.buttons[0] && gp.buttons[0].pressed;   // index trigger
+    return !!(grip || trig);
+  }
+  function pulse(ctrl, intensity, ms) {
+    const gp = ctrl.userData.inputSource && ctrl.userData.inputSource.gamepad;
+    const act = gp && gp.hapticActuators && gp.hapticActuators[0];
+    if (act && act.pulse) { try { act.pulse(intensity, ms); } catch (_) {} }
+  }
+  // Move the dolly so the world translates 1:1 with a hand's local movement:
+  // worldMove = q * (scale * localDelta); the dolly moves opposite, so the
+  // grabbed point stays locked under the hand.
+  function applyDrag(localDelta) {
+    _gDelta.copy(localDelta).multiplyScalar(dolly.scale.x).applyQuaternion(dolly.quaternion);
+    dolly.position.sub(_gDelta);
+  }
+
+  // Returns true while a grab is active this frame (the main loop uses this to
+  // defer the LOD reassess that would otherwise hitch mid-motion).
+  function updateGrab() {
+    const a = controllers[0], b = controllers[1];
+    const ga = isGrabbing(a), gb = isGrabbing(b);
+    const n = (ga ? 1 : 0) + (gb ? 1 : 0);
+
+    if (n === 2) {
+      _gMid.copy(a.position).add(b.position).multiplyScalar(0.5);
+      const dist = a.position.distanceTo(b.position);
+      if (_grabMode !== 2) {
+        _grabMode = 2;
+        _gPrevMid.copy(_gMid);
+        _gPrevDist = dist;
+        pulse(a, 0.4, 25); pulse(b, 0.4, 25);
+      } else {
+        // translate by midpoint movement…
+        _gDelta.copy(_gMid).sub(_gPrevMid);
+        applyDrag(_gDelta);
+        // …and scale by the inter-hand distance ratio, holding the world
+        // midpoint fixed: pos += q * ((sOld - sNew) * mid).
+        if (_gPrevDist > 1e-4 && dist > 1e-4) {
+          const sOld = dolly.scale.x;
+          let sNew = sOld * (_gPrevDist / dist);   // hands apart → smaller scale → bigger cell
+          sNew = Math.min(SCALE_MAX, Math.max(SCALE_MIN, sNew));
+          _gShift.copy(_gMid).multiplyScalar(sOld - sNew).applyQuaternion(dolly.quaternion);
+          dolly.position.add(_gShift);
+          dolly.scale.setScalar(sNew);
+        }
+        _gPrevMid.copy(_gMid);
+        _gPrevDist = dist;
+      }
+      return true;
+    }
+
+    if (n === 1) {
+      const c = ga ? a : b;
+      if (_grabMode !== 1 || _grabHand !== c) {
+        _grabMode = 1;
+        _grabHand = c;
+        _gPrev.copy(c.position);
+        pulse(c, 0.4, 25);
+      } else {
+        _gDelta.copy(c.position).sub(_gPrev);
+        applyDrag(_gDelta);
+        _gPrev.copy(c.position);
+      }
+      return true;
+    }
+
+    _grabMode = 0;
+    _grabHand = null;
+    return false;
+  }
+
   function updateVR(dt) {
-    if (!renderer.xr.isPresenting || !session) return;
+    if (!renderer.xr.isPresenting || !session) return false;
+
+    // Direct manipulation takes priority: while grabbing, skip stick locomotion
+    // so the two don't fight.
+    if (updateGrab()) return true;
+
     const xrCam = renderer.xr.getCamera();
     const head = xrCam.getWorldPosition(new THREE.Vector3());
     // Head yaw, so "forward" tracks where the user looks.
@@ -191,6 +295,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       dolly.position.copy(head).addScaledVector(delta, -factor);
       dolly.scale.setScalar(newScale);
     }
+    return false;
   }
 
   return { updateVR, get presenting() { return renderer.xr.isPresenting; } };
