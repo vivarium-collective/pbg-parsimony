@@ -1495,7 +1495,10 @@ const TARGET_DRAWN = 250000;
 const IS_MOBILE = typeof navigator !== "undefined"
   && /OculusBrowser|Quest|Mobile|Android|iPhone|iPad/i.test(navigator.userAgent || "");
 const FLAT_TARGET_DRAWN = IS_MOBILE ? 45000 : TARGET_DRAWN;
-if (IS_MOBILE) lodSphereBudgetPx = 10.0;  // cull sub-10px molecules on weak GPUs
+// Was 10 px on mobile, which left almost everything as egg-shaped proxies — no
+// real mesh shapes ever loaded. The DPR cap freed up enough headroom to use the
+// desktop threshold, so actual molecular shapes render when zoomed in.
+if (IS_MOBILE) lodSphereBudgetPx = 6.0;
 // A Meta Quest GPU renders in stereo at 72-90 Hz and is far weaker than a
 // desktop — draw far fewer instances while presenting or it lags out (and the
 // mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
