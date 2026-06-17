@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=44";
+import { initVR } from "./vr.js?v=45";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -905,6 +905,42 @@ async function loadLevel(best) {
     best.lvl.loading = false;
     objLoadsInFlight--;
     scheduleDrain(); // a slot freed — refill the pool (coalesced)
+  }
+}
+
+// One-shot bundle of every coarsest (lod0) mesh as a single binary file, so the
+// whole scene's shapes arrive in ONE request instead of ~300 — each of which
+// otherwise pays a wifi round-trip, which is the egg→mesh lag (worst on a Quest).
+// Best-effort: if the bundle is absent (older packs) the per-file drain still
+// fills everything in. Format (see make_mesh_bundle.py): [u32 headerLen][JSON
+// header padded so 4+headerLen is 4-aligned][ per entry: f32 positions, u32
+// indices ]. Normals are recomputed here (smaller download). Populates the same
+// in-memory geometry cache the drain primes from, so meshes materialise instantly.
+async function prefetchMeshBundle() {
+  const url = resolveMeshUrl("meshes/_bundle.lod0.bin");
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const buf = await r.arrayBuffer();
+    if (buf.byteLength < 4) return;
+    const headLen = new DataView(buf).getUint32(0, true);
+    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, headLen)));
+    let off = 4 + headLen; // padded → 4-byte aligned; each section keeps alignment
+    let n = 0;
+    for (const e of header.entries) {
+      const positions = new Float32Array(buf, off, e.p); off += e.p * 4;
+      const indices = new Uint32Array(buf, off, e.i); off += e.i * 4;
+      const key = resolveMeshUrl(e.url);
+      if (geomMemCache.has(key)) continue;
+      const geom = cacheEntryToGeometry({ positions, indices });
+      geom.computeVertexNormals();
+      geomMemCache.set(key, { geom, robustR: robustBoundingRadius(geom) });
+      n++;
+    }
+    console.log(`[viewer] mesh bundle: ${n} lod0 meshes in one request`);
+    scheduleReassess(); // prime tier materialises them on the next pass
+  } catch (e) {
+    console.warn("[viewer] mesh bundle prefetch skipped:", (e && e.message) || e);
   }
 }
 
@@ -3133,10 +3169,15 @@ const demoPicker = document.getElementById("demo-picker");
 
 async function loadByPath(path) {
   meshBaseUrl = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  // Fetch the coarse-mesh bundle in parallel with the (much larger) pack JSON.
+  // The ~1.5 MB bundle lands well before the tens-of-MB pack, so by the time we
+  // build the scene the lod0 geometry is already cached → shapes, not eggs.
+  const bundleReady = prefetchMeshBundle();
   try {
     const resp = await fetch(path);
     if (!resp.ok) throw new Error(resp.statusText);
     const doc = JSON.parse(await resp.text());
+    await bundleReady;
     buildScene(doc, path.split("/").pop());
   } catch (e) {
     console.warn("load failed:", e);
