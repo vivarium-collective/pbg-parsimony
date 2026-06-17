@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=40";
+import { initVR } from "./vr.js?v=41";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1502,7 +1502,8 @@ if (IS_MOBILE) lodSphereBudgetPx = 6.0;
 // A Meta Quest GPU renders in stereo at 72-90 Hz and is far weaker than a
 // desktop — draw far fewer instances while presenting or it lags out (and the
 // mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
-const VR_TARGET_DRAWN = 25000;
+const VR_TARGET_DRAWN = 15000;  // lowered from 25k — headroom so the Quest can't
+                                // GPU-lock (a lockup freezes even the Meta button)
 // In VR every drawn mesh ingredient uses this fixed (coarse) LOD instead of the
 // per-pixel pick — real molecular shapes at controlled GPU cost. 1 = lod1 (8 Å),
 // falling back to lod0 (16 Å) when lod1 is degenerate/missing.

@@ -100,7 +100,13 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       return;
     }
     renderer.xr.setReferenceSpaceType("local"); // head ≈ origin; we place the dolly
+    // Lighten the stereo GPU load so the Quest can't lock up (a GPU hang is what
+    // makes even the Meta button stop responding and forces a hardware restart):
+    // render the eye buffers at 0.8× and apply maximum fixed-foveation so the
+    // periphery is cheap. setFramebufferScaleFactor must be set before setSession.
+    try { renderer.xr.setFramebufferScaleFactor?.(0.8); } catch (_) {}
     await renderer.xr.setSession(session);
+    try { renderer.xr.setFoveation?.(1.0); } catch (_) {}
 
     // Frame the cell: drop the camera into the dolly, place the user back from
     // centre looking toward it, scaled so the cell is comfortably sized.
@@ -259,10 +265,14 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     if (!renderer.xr.isPresenting || !session) return false;
 
     // In-headset exit: the desktop "Exit VR" button is unreachable while
-    // immersed, so map the B (right) / Y (left) face button to end the session.
-    for (const c of controllers) {
-      const gp = c.userData.inputSource && c.userData.inputSource.gamepad;
-      if (gp && gp.buttons && gp.buttons[5] && gp.buttons[5].pressed) {
+    // immersed. Map ANY face button (A/B/X/Y) or thumbstick-click on either
+    // controller to ending the session, read straight off the live input sources
+    // so it works regardless of controller-binding quirks. Locomotion/grab use
+    // the triggers, grips and stick axes — buttons 3/4/5 are otherwise free.
+    for (const src of session.inputSources || []) {
+      const b = src.gamepad && src.gamepad.buttons;
+      if (!b) continue;
+      if ((b[3] && b[3].pressed) || (b[4] && b[4].pressed) || (b[5] && b[5].pressed)) {
         try { session.end(); } catch (_) {}
         return true;
       }
