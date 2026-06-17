@@ -33,7 +33,10 @@ const FLY_SPEED = 1.2;        // head-metres / second at full stick deflection (
 const SCALE_RATE = 0.6;       // world-scale change / second at full deflection
 const SCALE_MIN = 150;        // clamp world scale so you can't shrink/grow into black
                              // (lower = cell can grow bigger → deeper "inside")
-const SCALE_MAX = 9000;
+// Å per head-metre at the most "shrunk" end. The cell is ~20,000 Å, so
+// S=200,000 puts the whole cell at ~0.1 m — a small object you can hold in front
+// of you and turn over. (Was 9,000 ≈ 2 m, which only let it shrink to room-size.)
+const SCALE_MAX = 200000;
 const SNAP_ANGLE = Math.PI / 6;  // 30° comfort snap-turn (right stick X)
 const DEADZONE = 0.18;
 
