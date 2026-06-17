@@ -1061,15 +1061,26 @@ function buildLipidMembrane(placements) {
   // Goodsell membrane green: bright yellow-green heads, darker tails.
   const memColor = new THREE.Color(0.52, 0.76, 0.34);
   const T = MEMBRANE_THICKNESS;
-  // Inward offsets (fraction of T) + radius + head-flag per bilayer bead:
-  // outer head, two outer tails, two inner tails, inner head.
-  const beadT = [0.0, 0.28, 0.45, 0.55, 0.72, 1.0];
-  const beadR = [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS,
-                 MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS];
-  const beadH = [1, 0, 0, 0, 0, 1];
+  // Inward offsets (fraction of T) + radius + head-flag per bilayer bead. Full
+  // comb on desktop; a lean 3-bead column on mobile/Quest (head, mid-tail,
+  // inner head) so the always-drawn membrane stays cheap.
+  const beadT = IS_MOBILE ? [0.0, 0.5, 1.0]
+                          : [0.0, 0.28, 0.45, 0.55, 0.72, 1.0];
+  const beadR = IS_MOBILE
+    ? [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS]
+    : [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS,
+       MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS];
+  const beadH = IS_MOBILE ? [1, 0, 1] : [1, 0, 0, 0, 0, 1];
   const per = beadT.length;
+  // On mobile, subsample the lipids hard — the membrane is always drawn (not
+  // under the molecule draw budget), so it must stay light on the Quest.
+  const targetLipids = IS_MOBILE ? 6000 : Infinity;
+  const stride = Math.max(1, Math.ceil(placements.length / targetLipids));
   const cap = Math.floor(MEMBRANE_MAX_POINTS / per);
-  const lipids = placements.length > cap ? placements.slice(0, cap) : placements;
+  const lipids = [];
+  for (let i = 0; i < placements.length && lipids.length < cap; i += stride) {
+    lipids.push(placements[i]);
+  }
   const N = lipids.length * per;
   const pos = new Float32Array(N * 3), rad = new Float32Array(N), head = new Float32Array(N);
   const nrm = new THREE.Vector3();
@@ -1475,6 +1486,14 @@ let interiorFraction = 1.0;
 // that still reads as a crowded cell. Whole-cell packs (~1M+) are subsampled
 // down to this; smaller packs render in full.
 const TARGET_DRAWN = 250000;
+// Mobile GPUs (Meta Quest browser, phones/tablets) are far weaker than a
+// desktop and lag out at the desktop draw budget even in flat (non-VR) mode, so
+// cap the flat budget much lower there too. The Quest browser UA carries both
+// "OculusBrowser" and "Quest"/"Android".
+const IS_MOBILE = typeof navigator !== "undefined"
+  && /OculusBrowser|Quest|Mobile|Android|iPhone|iPad/i.test(navigator.userAgent || "");
+const FLAT_TARGET_DRAWN = IS_MOBILE ? 45000 : TARGET_DRAWN;
+if (IS_MOBILE) lodSphereBudgetPx = 10.0;  // cull sub-10px molecules on weak GPUs
 // A Meta Quest GPU renders in stereo at 72-90 Hz and is far weaker than a
 // desktop — draw far fewer instances while presenting or it lags out (and the
 // mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
@@ -1492,7 +1511,7 @@ function applyAdaptiveShowFraction(totalPlacements) {
   if (!totalPlacements) return;
   _packTotalPlacements = totalPlacements;
   const vr = renderer.xr.isPresenting;
-  const target = vr ? VR_TARGET_DRAWN : TARGET_DRAWN;
+  const target = vr ? VR_TARGET_DRAWN : FLAT_TARGET_DRAWN;
   let pct = (target / totalPlacements) * 100;
   pct = vr ? Math.min(100, Math.max(1, Math.round(pct)))
            : Math.min(100, Math.max(5, Math.round(pct / 5) * 5));
@@ -3044,11 +3063,17 @@ const vrApi = initVR({
   button: document.getElementById("vr-button"),
   onEnter: () => {
     controls.enabled = false; if (typeof autoSpin !== "undefined") autoSpin = false;
+    // The membrane is a large always-drawn point cloud (not under the draw
+    // budget) — in stereo on a Quest GPU it overwhelms the frame, so hide it in
+    // VR; the molecules render under the VR budget.
+    for (const m of compartmentMeshes) m.visible = false;
     applyAdaptiveShowFraction(_packTotalPlacements); // drop to the VR draw budget
     scheduleReassess();
   },
   onExit: () => {
     controls.enabled = true;
+    const memOn = !toggleMembrane || toggleMembrane.checked;
+    for (const m of compartmentMeshes) m.visible = memOn;
     applyAdaptiveShowFraction(_packTotalPlacements); // restore desktop budget
     scheduleReassess();
   },
