@@ -1934,6 +1934,8 @@ function clearHighlight() {
 // instead of the VdW-surface mesh. Locally-assembled complexes (no single
 // public structure) keep their mesh.
 let selectedAtoms = null;       // InstancedMesh of atoms for the selected instance
+let _atomsEntry = null;         // ingredient whose surface mesh we hid behind the atoms
+let _atomsPrevVisible = true;   // its visibility before we hid it (to restore)
 let _structToken = 0;           // guards async fetches against stale selections
 const _structCache = new Map(); // source key → centroid-centred xyz (Float32Array)
 const _atomGeom = new THREE.SphereGeometry(1.7, 6, 4); // low-poly atom (Å radius)
@@ -1943,6 +1945,12 @@ function clearAtoms() {
     scene.remove(selectedAtoms);
     if (selectedAtoms.material && selectedAtoms.material.dispose) selectedAtoms.material.dispose();
     selectedAtoms = null;
+  }
+  if (_atomsEntry) {            // restore the type's surface mesh we hid behind the atoms
+    _atomsEntry.visible = _atomsPrevVisible;
+    _atomsEntry = null;
+    applyVisibility();
+    renderLegend();
   }
 }
 function _parsePdbAtoms(text) {
@@ -2019,6 +2027,8 @@ async function showAtomicStructure(entry, worldMatrix) {
   if (!src) { console.log("[viewer] no public structure for", entry.name); return; }
   const token = ++_structToken;
   const wm = worldMatrix.clone();
+  const elLoad = document.getElementById("info-structure");
+  if (elLoad) elLoad.innerHTML = `structure <span class="num">${escapeHtml(String(src.id))}</span> — loading…`;
   let atoms;
   try { atoms = await _fetchStructureAtoms(src); }
   catch (e) {
@@ -2043,6 +2053,12 @@ async function showAtomicStructure(entry, worldMatrix) {
   clearAtoms();
   scene.add(inst);
   selectedAtoms = inst;
+  // Hide this molecule type's surface mesh so the atoms aren't obscured by it.
+  _atomsEntry = entry;
+  _atomsPrevVisible = entry.visible;
+  entry.visible = false;
+  applyVisibility();
+  renderLegend();
   const at = wm.elements;  // world translation of the instance (for an alignment sanity check)
   console.log(`[viewer] atomic structure ${src.id}: ${nAtoms} atoms at [${at[12].toFixed(0)}, ${at[13].toFixed(0)}, ${at[14].toFixed(0)}]`);
   const el = document.getElementById("info-structure");
@@ -2066,9 +2082,6 @@ function selectInstance(entry, geometry, worldMatrix) {
   scene.add(mesh);
   selectedHighlight = mesh;
   selectedAnchor = _selPos.clone();
-  // Show the real atomic structure (if this ingredient has a public one) at the
-  // picked instance's pose, in place of its surface mesh. Async; no-op otherwise.
-  showAtomicStructure(entry, worldMatrix);
   renderInfoPanel(entry);
   setInfo(true);
   updateInfoAnchor();  // position the card immediately (no first-frame flash)
@@ -2107,7 +2120,7 @@ function renderInfoPanel(e) {
     + `<div class="info-stat"><span class="num">${count.toLocaleString()}</span> copies placed</div>`
     + `<div class="info-stat">size: ~<span class="num">${radius}</span> Å radius</div>`
     + `<div class="info-stat" id="info-structure">${m.structure
-        ? `atomic structure: <span class="num">${escapeHtml(String(m.structure.id))}</span> (loading…)`
+        ? `structure <span class="num">${escapeHtml(String(m.structure.id))}</span> — <span style="color:var(--text-dim)">double-click to show atoms</span>`
         : `<span style="color:var(--text-dim)">no public structure (assembled complex)</span>`}</div>`
     + `<div class="info-actions">`
     + (url ? `<a class="info-link" href="${url}" target="_blank" rel="noopener">EcoCyc entry ↗</a>`
@@ -2127,7 +2140,7 @@ const _raycaster = new THREE.Raycaster();
 const _pickNdc = new THREE.Vector2();
 const _pickMat = new THREE.Matrix4();
 const _pickAllSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e12);  // "always intersects"
-function pickAt(clientX, clientY) {
+function pickAt(clientX, clientY, showStructure = false) {
   const rect = renderer.domElement.getBoundingClientRect();
   _pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   _pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -2164,6 +2177,9 @@ function pickAt(clientX, clientY) {
   hit.object.getMatrixAt(hit.instanceId, _pickMat);
   const world = hit.object.matrixWorld.clone().multiply(_pickMat);
   selectInstance(entry, hit.object.geometry, world);
+  // Double-click → also swap in the real atomic structure (single click just
+  // highlights). No-op for ingredients without a public structure.
+  if (showStructure) showAtomicStructure(entry, world);
 }
 // Keep the info card pinned next to the selected molecule as the camera moves.
 const _projAnchor = new THREE.Vector3();
@@ -2492,6 +2508,10 @@ renderer.domElement.addEventListener("pointermove", (e) => {
 });
 renderer.domElement.addEventListener("pointerup", (e) => {
   if (e.button === 0 && !_dragMoved) pickAt(e.clientX, e.clientY);
+});
+// Double-click → highlight AND swap in the real PDB/CIF atomic structure.
+renderer.domElement.addEventListener("dblclick", (e) => {
+  if (e.button === 0) pickAt(e.clientX, e.clientY, true);
 });
 
 window.addEventListener("keydown", (e) => {
