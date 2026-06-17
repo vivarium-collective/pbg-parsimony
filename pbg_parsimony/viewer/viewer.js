@@ -1923,7 +1923,121 @@ function clearHighlight() {
     if (selectedHighlight.geometry) selectedHighlight.geometry.dispose();
     selectedHighlight = null;
   }
+  clearAtoms();
   selectedAnchor = null;
+}
+
+// ───── real PDB/CIF structure on select ──────────────────────────────
+// When an ingredient has a public structure source (RCSB id / AlphaFold
+// accession, recorded in the meta sidecar), fetch it and render its atoms as
+// cel-shaded spheres at the selected instance's exact pose — the real molecule
+// instead of the VdW-surface mesh. Locally-assembled complexes (no single
+// public structure) keep their mesh.
+let selectedAtoms = null;       // InstancedMesh of atoms for the selected instance
+let _structToken = 0;           // guards async fetches against stale selections
+const _structCache = new Map(); // source key → centroid-centred xyz (Float32Array)
+const _atomGeom = new THREE.SphereGeometry(1.7, 6, 4); // low-poly atom (Å radius)
+
+function clearAtoms() {
+  if (selectedAtoms) {
+    scene.remove(selectedAtoms);
+    if (selectedAtoms.material && selectedAtoms.material.dispose) selectedAtoms.material.dispose();
+    selectedAtoms = null;
+  }
+}
+function _parsePdbAtoms(text) {
+  const xs = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith("ATOM") || line.startsWith("HETATM")) {
+      const x = parseFloat(line.slice(30, 38));
+      const y = parseFloat(line.slice(38, 46));
+      const z = parseFloat(line.slice(46, 54));
+      if (!isNaN(x) && !isNaN(y) && !isNaN(z)) xs.push(x, y, z);
+    }
+  }
+  return new Float32Array(xs);
+}
+function _parseCifAtoms(text) {
+  const lines = text.split("\n");
+  const xs = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === "loop_") {
+      const hdr = [];
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim().startsWith("_")) { hdr.push(lines[j].trim()); j++; }
+      const cx = hdr.indexOf("_atom_site.Cartn_x");
+      const cy = hdr.indexOf("_atom_site.Cartn_y");
+      const cz = hdr.indexOf("_atom_site.Cartn_z");
+      if (cx >= 0 && cy >= 0 && cz >= 0) {
+        let k = j;
+        while (k < lines.length) {
+          const t = lines[k].trim();
+          if (t === "" || t === "#" || t === "loop_" || t.startsWith("_")) break;
+          const p = t.split(/\s+/);
+          if (p.length >= hdr.length) {
+            const x = parseFloat(p[cx]), y = parseFloat(p[cy]), z = parseFloat(p[cz]);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(z)) xs.push(x, y, z);
+          }
+          k++;
+        }
+        return new Float32Array(xs);
+      }
+      i = j;
+    } else { i++; }
+  }
+  return new Float32Array(xs);
+}
+async function _fetchStructureAtoms(src) {
+  const key = src.db + ":" + src.id + ":" + (src.fmt || "");
+  if (_structCache.has(key)) return _structCache.get(key);
+  let url, fmt;
+  if (src.db === "rcsb") {
+    fmt = src.fmt || "pdb";
+    url = `https://files.rcsb.org/download/${src.id}.${fmt}`;
+  } else if (src.db === "alphafold") {
+    const api = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${src.id}`);
+    const j = await api.json();
+    url = (Array.isArray(j) ? j[0] : j).pdbUrl;
+    fmt = "pdb";
+  } else { return null; }
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url} → ${resp.status}`);
+  const text = await resp.text();
+  const atoms = fmt === "cif" ? _parseCifAtoms(text) : _parsePdbAtoms(text);
+  // Centre on the centroid — the VdW mesh's local frame is centred there too.
+  const n = atoms.length / 3;
+  let cx = 0, cy = 0, cz = 0;
+  for (let a = 0; a < atoms.length; a += 3) { cx += atoms[a]; cy += atoms[a + 1]; cz += atoms[a + 2]; }
+  cx /= n; cy /= n; cz /= n;
+  for (let a = 0; a < atoms.length; a += 3) { atoms[a] -= cx; atoms[a + 1] -= cy; atoms[a + 2] -= cz; }
+  _structCache.set(key, atoms);
+  return atoms;
+}
+async function showAtomicStructure(entry, worldMatrix) {
+  const src = metaFor(entry).structure;
+  if (!src) return; // no public structure → keep the mesh
+  const token = ++_structToken;
+  const wm = worldMatrix.clone();
+  let atoms;
+  try { atoms = await _fetchStructureAtoms(src); }
+  catch (e) { console.warn("[viewer] structure fetch failed", src, e); return; }
+  // Bail if the selection changed while we were fetching.
+  if (!atoms || token !== _structToken || selectedName !== entry.name) return;
+  const nAtoms = atoms.length / 3;
+  const inst = new THREE.InstancedMesh(_atomGeom, makeCelMaterial(entry.color), nAtoms);
+  inst.frustumCulled = false;
+  inst.renderOrder = 998;
+  const m = new THREE.Matrix4(), t = new THREE.Matrix4();
+  for (let a = 0, idx = 0; a < atoms.length; a += 3, idx++) {
+    t.makeTranslation(atoms[a], atoms[a + 1], atoms[a + 2]);
+    m.multiplyMatrices(wm, t);
+    inst.setMatrixAt(idx, m);
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  clearAtoms();
+  scene.add(inst);
+  selectedAtoms = inst;
 }
 // Outline + select a specific instance. worldMatrix places the hull; geometry
 // is the picked instance's geometry (or a fallback sphere for legend picks).
@@ -1943,6 +2057,9 @@ function selectInstance(entry, geometry, worldMatrix) {
   scene.add(mesh);
   selectedHighlight = mesh;
   selectedAnchor = _selPos.clone();
+  // Show the real atomic structure (if this ingredient has a public one) at the
+  // picked instance's pose, in place of its surface mesh. Async; no-op otherwise.
+  showAtomicStructure(entry, worldMatrix);
   renderInfoPanel(entry);
   setInfo(true);
   updateInfoAnchor();  // position the card immediately (no first-frame flash)
