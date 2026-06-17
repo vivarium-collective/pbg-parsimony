@@ -1042,6 +1042,63 @@ function buildImpostorMembrane(doc) {
   }
 }
 
+// Render the membrane from the packer's surface lipid placements as a combed
+// bilayer — each lipid becomes a head bead at the surface + tail beads reaching
+// inward to a deeper inner-leaflet head, oriented along the local outward
+// normal (radial from the cell's long axis). Reads as Goodsell's comb-like
+// bilayer (green heads, darker tails) and follows the real cell shape (capsule
+// or constricted/dividing mesh) since it uses the actual placements. The plain
+// lipid spheres are skipped in favour of this; the membrane toggle controls it.
+function buildLipidMembrane(placements) {
+  if (!placements || !placements.length) return;
+  // Cell long axis ≈ x; medial line at the placements' mean (y, z).
+  let x0 = Infinity, x1 = -Infinity, sy = 0, sz = 0;
+  for (const p of placements) {
+    const [x, y, z] = p.position;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; sy += y; sz += z;
+  }
+  const cy = sy / placements.length, cz = sz / placements.length;
+  // Goodsell membrane green: bright yellow-green heads, darker tails.
+  const memColor = new THREE.Color(0.52, 0.76, 0.34);
+  const T = MEMBRANE_THICKNESS;
+  // Inward offsets (fraction of T) + radius + head-flag per bilayer bead:
+  // outer head, two outer tails, two inner tails, inner head.
+  const beadT = [0.0, 0.28, 0.45, 0.55, 0.72, 1.0];
+  const beadR = [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS,
+                 MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS];
+  const beadH = [1, 0, 0, 0, 0, 1];
+  const per = beadT.length;
+  const cap = Math.floor(MEMBRANE_MAX_POINTS / per);
+  const lipids = placements.length > cap ? placements.slice(0, cap) : placements;
+  const N = lipids.length * per;
+  const pos = new Float32Array(N * 3), rad = new Float32Array(N), head = new Float32Array(N);
+  const nrm = new THREE.Vector3();
+  let w = 0;
+  for (const p of lipids) {
+    const [x, y, z] = p.position;
+    const mx = Math.max(x0, Math.min(x1, x));   // nearest point on the long axis
+    nrm.set(x - mx, y - cy, z - cz);
+    if (nrm.lengthSq() < 1e-6) nrm.set(0, 1, 0);
+    nrm.normalize();
+    for (let b = 0; b < per; b++) {
+      const off = -beadT[b] * T;                 // inward from the surface
+      pos[w * 3] = x + nrm.x * off;
+      pos[w * 3 + 1] = y + nrm.y * off;
+      pos[w * 3 + 2] = z + nrm.z * off;
+      rad[w] = beadR[b]; head[w] = beadH[b]; w++;
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute("aRadius", new THREE.BufferAttribute(rad, 1));
+  geom.setAttribute("aHead", new THREE.BufferAttribute(head, 1));
+  const points = new THREE.Points(geom, makeImpostorMaterial(memColor));
+  points.frustumCulled = false;
+  points.visible = !toggleMembrane || toggleMembrane.checked;
+  scene.add(points);
+  compartmentMeshes.push(points); // disposed by disposeCompartments, toggled as "membrane"
+}
+
 // ───── chromosome / genome ───────────────────────────────────────────
 // The chromosome is no longer a bespoke tube. The packer emits it as tens of
 // thousands of `dna_segment` mesh instances — one shared real-dsDNA mesh
@@ -1115,14 +1172,19 @@ async function buildScene(doc, fileName) {
   // placements whose desired LOD hasn't loaded yet); `reassessLODs`
   // partitions placements across the fallback and any loaded LOD
   // meshes on every camera change.
+  let lipidPlacements = null;
   for (const [tid, pts] of byType.entries()) {
     const ing = ingredientById.get(tid);
     if (!ing) continue;
+    // The lipid ingredient IS the membrane: render it as a combed head+tail
+    // bilayer (below), not plain spheres — so skip the normal instanced path.
+    if (ing.name === "lipid") { lipidPlacements = pts; continue; }
     const colorArr = ing.color || [0.5, 0.5, 0.5];
     const color = new THREE.Color(colorArr[0], colorArr[1], colorArr[2]);
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
     addInstancedType(ing, color, enc, pts);
   }
+  if (lipidPlacements) buildLipidMembrane(lipidPlacements);
   applyStyle();
 
   // Schedule the first LOD assessment now (loads coarse mesh per
