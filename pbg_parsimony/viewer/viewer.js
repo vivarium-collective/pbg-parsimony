@@ -1923,60 +1923,49 @@ function clearHighlight() {
     if (selectedHighlight.geometry) selectedHighlight.geometry.dispose();
     selectedHighlight = null;
   }
-  clearAtoms();
+  disposeStructureBox();
   selectedAnchor = null;
 }
 
-// ───── real PDB/CIF structure on select ──────────────────────────────
-// When an ingredient has a public structure source (RCSB id / AlphaFold
-// accession, recorded in the meta sidecar), fetch it and render its atoms as
-// cel-shaded spheres at the selected instance's exact pose — the real molecule
-// instead of the VdW-surface mesh. Locally-assembled complexes (no single
-// public structure) keep their mesh.
-let selectedAtoms = null;       // InstancedMesh of atoms for the selected instance
-let _atomsEntry = null;         // ingredient whose surface mesh we hid behind the atoms
-let _atomsPrevVisible = true;   // its visibility before we hid it (to restore)
-let _structToken = 0;           // guards async fetches against stale selections
-const _structCache = new Map(); // source key → centroid-centred xyz (Float32Array)
-const _atomGeom = new THREE.SphereGeometry(1.7, 6, 4); // low-poly atom (Å radius)
+// ───── interactive atomic structure in the info box ──────────────────
+// When a selected ingredient has a public structure (RCSB id / AlphaFold
+// accession recorded in the meta sidecar), show its real all-atom structure in
+// a small interactive viewer (orbit + zoom) inside the info panel, CPK-coloured
+// by element. The main-scene mesh just stays highlighted. Assembled complexes
+// (no single public structure) show nothing in the box.
+let _structToken = 0;             // guards async fetches against stale selections
+const _structCache = new Map();   // source key → { xyz, colors } (centroid-centred)
+let _mv = null;                   // the lazily-created mini-viewer
 
-function clearAtoms() {
-  if (selectedAtoms) {
-    scene.remove(selectedAtoms);
-    if (selectedAtoms.material && selectedAtoms.material.dispose) selectedAtoms.material.dispose();
-    selectedAtoms = null;
-  }
-  if (_atomsEntry) {            // restore the type's surface mesh we hid behind the atoms
-    _atomsEntry.visible = _atomsPrevVisible;
-    _atomsEntry = null;
-    applyVisibility();
-    renderLegend();
-  }
-}
-function _parsePdbAtoms(text) {
-  const xs = [];
+const CPK = {
+  C: [0.50, 0.50, 0.52], N: [0.20, 0.34, 0.96], O: [0.93, 0.18, 0.18],
+  S: [0.95, 0.80, 0.22], P: [0.95, 0.55, 0.22], H: [0.92, 0.92, 0.92],
+  FE: [0.88, 0.40, 0.20], MG: [0.24, 0.85, 0.45], ZN: [0.49, 0.50, 0.69],
+};
+const CPK_DEFAULT = [0.85, 0.45, 0.85];
+function _cpk(el) { return CPK[el] || CPK[el && el[0]] || CPK_DEFAULT; }
+
+function _parsePdb(text) {
+  const xs = [], cs = [];
   for (const line of text.split("\n")) {
     if (line.startsWith("ATOM") || line.startsWith("HETATM")) {
-      const x = parseFloat(line.slice(30, 38));
-      const y = parseFloat(line.slice(38, 46));
-      const z = parseFloat(line.slice(46, 54));
-      if (!isNaN(x) && !isNaN(y) && !isNaN(z)) xs.push(x, y, z);
+      const x = parseFloat(line.slice(30, 38)), y = parseFloat(line.slice(38, 46)), z = parseFloat(line.slice(46, 54));
+      if (isNaN(x) || isNaN(y) || isNaN(z)) continue;
+      let e = line.slice(76, 78).trim().toUpperCase();
+      if (!e) { const nm = line.slice(12, 16).trim(); e = (nm.match(/[A-Za-z]/) || ["C"])[0].toUpperCase(); }
+      xs.push(x, y, z); const c = _cpk(e); cs.push(c[0], c[1], c[2]);
     }
   }
-  return new Float32Array(xs);
+  return { xyz: new Float32Array(xs), colors: new Float32Array(cs) };
 }
-function _parseCifAtoms(text) {
-  const lines = text.split("\n");
-  const xs = [];
-  let i = 0;
+function _parseCif(text) {
+  const lines = text.split("\n"); const xs = [], cs = []; let i = 0;
   while (i < lines.length) {
     if (lines[i].trim() === "loop_") {
-      const hdr = [];
-      let j = i + 1;
+      const hdr = []; let j = i + 1;
       while (j < lines.length && lines[j].trim().startsWith("_")) { hdr.push(lines[j].trim()); j++; }
-      const cx = hdr.indexOf("_atom_site.Cartn_x");
-      const cy = hdr.indexOf("_atom_site.Cartn_y");
-      const cz = hdr.indexOf("_atom_site.Cartn_z");
+      const cx = hdr.indexOf("_atom_site.Cartn_x"), cy = hdr.indexOf("_atom_site.Cartn_y"), cz = hdr.indexOf("_atom_site.Cartn_z");
+      const ce = hdr.indexOf("_atom_site.type_symbol");
       if (cx >= 0 && cy >= 0 && cz >= 0) {
         let k = j;
         while (k < lines.length) {
@@ -1985,84 +1974,117 @@ function _parseCifAtoms(text) {
           const p = t.split(/\s+/);
           if (p.length >= hdr.length) {
             const x = parseFloat(p[cx]), y = parseFloat(p[cy]), z = parseFloat(p[cz]);
-            if (!isNaN(x) && !isNaN(y) && !isNaN(z)) xs.push(x, y, z);
+            if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+              xs.push(x, y, z); const c = _cpk(ce >= 0 ? p[ce].toUpperCase() : "C"); cs.push(c[0], c[1], c[2]);
+            }
           }
           k++;
         }
-        return new Float32Array(xs);
+        return { xyz: new Float32Array(xs), colors: new Float32Array(cs) };
       }
       i = j;
     } else { i++; }
   }
-  return new Float32Array(xs);
+  return { xyz: new Float32Array(xs), colors: new Float32Array(cs) };
 }
-async function _fetchStructureAtoms(src) {
+async function _fetchStructure(src) {
   const key = src.db + ":" + src.id + ":" + (src.fmt || "");
   if (_structCache.has(key)) return _structCache.get(key);
   let url, fmt;
   if (src.db === "rcsb") {
-    fmt = src.fmt || "pdb";
-    url = `https://files.rcsb.org/download/${src.id}.${fmt}`;
+    fmt = src.fmt || "pdb"; url = `https://files.rcsb.org/download/${src.id}.${fmt}`;
   } else if (src.db === "alphafold") {
-    const api = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${src.id}`);
-    const j = await api.json();
-    url = (Array.isArray(j) ? j[0] : j).pdbUrl;
-    fmt = "pdb";
+    const a = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${src.id}`);
+    const j = await a.json(); url = (Array.isArray(j) ? j[0] : j).pdbUrl; fmt = "pdb";
   } else { return null; }
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`fetch ${url} → ${resp.status}`);
-  const text = await resp.text();
-  const atoms = fmt === "cif" ? _parseCifAtoms(text) : _parsePdbAtoms(text);
-  // Centre on the centroid — the VdW mesh's local frame is centred there too.
-  const n = atoms.length / 3;
+  const data = fmt === "cif" ? _parseCif(await resp.text()) : _parsePdb(await resp.text());
+  const xyz = data.xyz, n = xyz.length / 3;
   let cx = 0, cy = 0, cz = 0;
-  for (let a = 0; a < atoms.length; a += 3) { cx += atoms[a]; cy += atoms[a + 1]; cz += atoms[a + 2]; }
+  for (let a = 0; a < xyz.length; a += 3) { cx += xyz[a]; cy += xyz[a + 1]; cz += xyz[a + 2]; }
   cx /= n; cy /= n; cz /= n;
-  for (let a = 0; a < atoms.length; a += 3) { atoms[a] -= cx; atoms[a + 1] -= cy; atoms[a + 2] -= cz; }
-  _structCache.set(key, atoms);
-  return atoms;
+  for (let a = 0; a < xyz.length; a += 3) { xyz[a] -= cx; xyz[a + 1] -= cy; xyz[a + 2] -= cz; }
+  _structCache.set(key, data);
+  return data;
 }
-async function showAtomicStructure(entry, worldMatrix) {
+function _initMiniViewer() {
+  const canvas = document.getElementById("struct-canvas");
+  if (!canvas) return null;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  const sc = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(40, 1, 1, 400000);
+  sc.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85); dir.position.set(1, 1, 1.5);
+  cam.add(dir); sc.add(cam);
+  const group = new THREE.Group(); sc.add(group);
+  const ctrl = new OrbitControls(cam, canvas);
+  ctrl.enableDamping = false; ctrl.enablePan = false;
+  const mv = { renderer, scene: sc, camera: cam, group, ctrl, mesh: null };
+  mv.render = () => {
+    const w = canvas.clientWidth || 300, h = canvas.clientHeight || 220, pr = renderer.getPixelRatio();
+    if (canvas.width !== Math.round(w * pr) || canvas.height !== Math.round(h * pr)) {
+      renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix();
+    }
+    renderer.render(sc, cam);
+  };
+  ctrl.addEventListener("change", mv.render);
+  _mv = mv;
+  return mv;
+}
+function disposeStructureBox() {
+  const canvas = document.getElementById("struct-canvas");
+  if (canvas) canvas.hidden = true;
+  if (_mv && _mv.mesh) {
+    _mv.group.remove(_mv.mesh);
+    _mv.mesh.material.dispose();
+    if (_mv.mesh.geometry) _mv.mesh.geometry.dispose();
+    _mv.mesh = null;
+  }
+}
+async function loadStructureBox(entry) {
   const src = metaFor(entry).structure;
-  if (!src) { console.log("[viewer] no public structure for", entry.name); return; }
+  const canvas = document.getElementById("struct-canvas");
+  if (!src) { disposeStructureBox(); return; }
   const token = ++_structToken;
-  const wm = worldMatrix.clone();
-  const elLoad = document.getElementById("info-structure");
-  if (elLoad) elLoad.innerHTML = `structure <span class="num">${escapeHtml(String(src.id))}</span> — loading…`;
-  let atoms;
-  try { atoms = await _fetchStructureAtoms(src); }
+  const el = document.getElementById("info-structure");
+  if (el) el.innerHTML = `structure <span class="num">${escapeHtml(String(src.id))}</span> — loading…`;
+  let data;
+  try { data = await _fetchStructure(src); }
   catch (e) {
     console.warn("[viewer] structure fetch failed", src, e);
-    const el = document.getElementById("info-structure");
     if (el) el.innerHTML = `<span style="color:#e6667f">structure ${escapeHtml(String(src.id))} failed to load</span>`;
     return;
   }
-  // Bail if the selection changed while we were fetching.
-  if (!atoms || token !== _structToken || selectedName !== entry.name) return;
-  const nAtoms = atoms.length / 3;
-  const inst = new THREE.InstancedMesh(_atomGeom, makeCelMaterial(entry.color), nAtoms);
-  inst.frustumCulled = false;
-  inst.renderOrder = 998;
-  const m = new THREE.Matrix4(), t = new THREE.Matrix4();
-  for (let a = 0, idx = 0; a < atoms.length; a += 3, idx++) {
-    t.makeTranslation(atoms[a], atoms[a + 1], atoms[a + 2]);
-    m.multiplyMatrices(wm, t);
-    inst.setMatrixAt(idx, m);
+  if (!data || token !== _structToken || selectedName !== entry.name) return;
+  const mv = _mv || _initMiniViewer();
+  if (!mv) return;
+  if (canvas) canvas.hidden = false;
+  if (mv.mesh) { mv.group.remove(mv.mesh); mv.mesh.material.dispose(); mv.mesh.geometry.dispose(); mv.mesh = null; }
+  const xyz = data.xyz, colors = data.colors, n = xyz.length / 3;
+  const inst = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(1.6, 6, 4),
+    new THREE.MeshStandardMaterial({ metalness: 0.0, roughness: 0.85 }), n);
+  const m = new THREE.Matrix4(), col = new THREE.Color();
+  let r2 = 0;
+  for (let a = 0, idx = 0; a < xyz.length; a += 3, idx++) {
+    m.makeTranslation(xyz[a], xyz[a + 1], xyz[a + 2]); inst.setMatrixAt(idx, m);
+    col.setRGB(colors[a], colors[a + 1], colors[a + 2]); inst.setColorAt(idx, col);
+    const rr = xyz[a] * xyz[a] + xyz[a + 1] * xyz[a + 1] + xyz[a + 2] * xyz[a + 2];
+    if (rr > r2) r2 = rr;
   }
   inst.instanceMatrix.needsUpdate = true;
-  clearAtoms();
-  scene.add(inst);
-  selectedAtoms = inst;
-  // Hide this molecule type's surface mesh so the atoms aren't obscured by it.
-  _atomsEntry = entry;
-  _atomsPrevVisible = entry.visible;
-  entry.visible = false;
-  applyVisibility();
-  renderLegend();
-  const at = wm.elements;  // world translation of the instance (for an alignment sanity check)
-  console.log(`[viewer] atomic structure ${src.id}: ${nAtoms} atoms at [${at[12].toFixed(0)}, ${at[13].toFixed(0)}, ${at[14].toFixed(0)}]`);
-  const el = document.getElementById("info-structure");
-  if (el) el.innerHTML = `atomic structure: <span class="num">${escapeHtml(String(src.id))}</span> · <span class="num">${nAtoms.toLocaleString()}</span> atoms`;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  mv.group.add(inst); mv.mesh = inst;
+  const R = Math.sqrt(r2) + 2;
+  const dist = R / Math.sin((mv.camera.fov * Math.PI / 180) / 2) * 1.15;
+  mv.ctrl.target.set(0, 0, 0);
+  mv.camera.position.set(0, 0, dist);
+  mv.camera.near = Math.max(1, dist - 2 * R); mv.camera.far = dist + 2 * R;
+  mv.camera.updateProjectionMatrix();
+  mv.ctrl.update(); mv.render();
+  if (el) el.innerHTML = `structure: <span class="num">${escapeHtml(String(src.id))}</span> · <span class="num">${n.toLocaleString()}</span> atoms <span style="color:var(--text-dim)">· drag to rotate</span>`;
 }
 // Outline + select a specific instance. worldMatrix places the hull; geometry
 // is the picked instance's geometry (or a fallback sphere for legend picks).
@@ -2084,6 +2106,7 @@ function selectInstance(entry, geometry, worldMatrix) {
   selectedAnchor = _selPos.clone();
   renderInfoPanel(entry);
   setInfo(true);
+  loadStructureBox(entry);  // show the real atomic structure in the info box (if any)
   updateInfoAnchor();  // position the card immediately (no first-frame flash)
   renderLegend();
 }
@@ -2120,7 +2143,7 @@ function renderInfoPanel(e) {
     + `<div class="info-stat"><span class="num">${count.toLocaleString()}</span> copies placed</div>`
     + `<div class="info-stat">size: ~<span class="num">${radius}</span> Å radius</div>`
     + `<div class="info-stat" id="info-structure">${m.structure
-        ? `structure <span class="num">${escapeHtml(String(m.structure.id))}</span> — <span style="color:var(--text-dim)">double-click to show atoms</span>`
+        ? `structure <span class="num">${escapeHtml(String(m.structure.id))}</span> — loading…`
         : `<span style="color:var(--text-dim)">no public structure (assembled complex)</span>`}</div>`
     + `<div class="info-actions">`
     + (url ? `<a class="info-link" href="${url}" target="_blank" rel="noopener">EcoCyc entry ↗</a>`
@@ -2140,7 +2163,7 @@ const _raycaster = new THREE.Raycaster();
 const _pickNdc = new THREE.Vector2();
 const _pickMat = new THREE.Matrix4();
 const _pickAllSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1e12);  // "always intersects"
-function pickAt(clientX, clientY, showStructure = false) {
+function pickAt(clientX, clientY) {
   const rect = renderer.domElement.getBoundingClientRect();
   _pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   _pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -2177,9 +2200,6 @@ function pickAt(clientX, clientY, showStructure = false) {
   hit.object.getMatrixAt(hit.instanceId, _pickMat);
   const world = hit.object.matrixWorld.clone().multiply(_pickMat);
   selectInstance(entry, hit.object.geometry, world);
-  // Double-click → also swap in the real atomic structure (single click just
-  // highlights). No-op for ingredients without a public structure.
-  if (showStructure) showAtomicStructure(entry, world);
 }
 // Keep the info card pinned next to the selected molecule as the camera moves.
 const _projAnchor = new THREE.Vector3();
@@ -2508,10 +2528,6 @@ renderer.domElement.addEventListener("pointermove", (e) => {
 });
 renderer.domElement.addEventListener("pointerup", (e) => {
   if (e.button === 0 && !_dragMoved) pickAt(e.clientX, e.clientY);
-});
-// Double-click → highlight AND swap in the real PDB/CIF atomic structure.
-renderer.domElement.addEventListener("dblclick", (e) => {
-  if (e.button === 0) pickAt(e.clientX, e.clientY, true);
 });
 
 window.addEventListener("keydown", (e) => {
