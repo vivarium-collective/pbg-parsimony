@@ -47,7 +47,13 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 100000);
 camera.position.set(150, 120, 200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
+// Cap the device pixel ratio. Rendering at a phone/Quest's native DPR (2–3×)
+// means 4–9× the fragments — it craters the framerate and the choppy motion
+// reads as glitchy/dizzy. Clamp hard on mobile, modestly on desktop retina.
+{
+  const _mob = /OculusBrowser|Quest|Mobile|Android|iPhone|iPad/i.test(navigator.userAgent || "");
+  renderer.setPixelRatio(Math.min(_mob ? 1.0 : 1.75, window.devicePixelRatio || 1));
+}
 renderer.localClippingEnabled = true;
 renderer.xr.enabled = true;   // WebXR ("View in VR") — see vr.js
 canvasWrap.appendChild(renderer.domElement);
