@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=43";
+import { initVR } from "./vr.js?v=44";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -446,7 +446,12 @@ let objLoadsInFlight = 0;
 // arrays the main thread caches + uploads. The main thread keeps the
 // memory + IndexedDB cache tiers; only misses go to a worker. Falls back
 // to main-thread parsing (`fetchAndParseObj`) if Workers are unavailable.
-const WORKER_COUNT = Math.max(2, Math.min(8, navigator.hardwareConcurrency || 4));
+// Each worker FETCHES (network I/O — mostly waiting) then parses an OBJ, so the
+// pool is network-bound, not CPU-bound: oversubscribe well past the core count
+// so many downloads overlap and the egg→mesh fill-in is fast even on a Quest
+// (~6 cores) over wifi. Parse CPU contention is brief and only during the
+// initial load. Was min(8, cores), which throttled cold loads to a trickle.
+const WORKER_COUNT = Math.max(8, Math.min(24, (navigator.hardwareConcurrency || 4) * 3));
 const MAX_CONCURRENT_LOADS = WORKER_COUNT; // load tasks in flight at once
 let objWorkers = null; // array of Workers, or null → main-thread parsing
 let _workerNext = 0; // round-robin cursor
