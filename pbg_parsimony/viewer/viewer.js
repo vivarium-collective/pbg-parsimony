@@ -1061,20 +1061,17 @@ function buildLipidMembrane(placements) {
   // Goodsell membrane green: bright yellow-green heads, darker tails.
   const memColor = new THREE.Color(0.52, 0.76, 0.34);
   const T = MEMBRANE_THICKNESS;
-  // Inward offsets (fraction of T) + radius + head-flag per bilayer bead. Full
-  // comb on desktop; a lean 3-bead column on mobile/Quest (head, mid-tail,
-  // inner head) so the always-drawn membrane stays cheap.
-  const beadT = IS_MOBILE ? [0.0, 0.5, 1.0]
-                          : [0.0, 0.28, 0.45, 0.55, 0.72, 1.0];
-  const beadR = IS_MOBILE
-    ? [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS]
-    : [MEMBRANE_HEAD_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS,
-       MEMBRANE_TAIL_RADIUS, MEMBRANE_TAIL_RADIUS, MEMBRANE_HEAD_RADIUS];
-  const beadH = IS_MOBILE ? [1, 0, 1] : [1, 0, 0, 0, 0, 1];
-  const per = beadT.length;
-  // On mobile, subsample the lipids hard — the membrane is always drawn (not
-  // under the molecule draw budget), so it must stay light on the Quest.
-  const targetLipids = IS_MOBILE ? 6000 : Infinity;
+  // A single dense layer of large head beads on the cell surface — reads as a
+  // continuous green membrane band, rather than the spindly per-lipid combs
+  // (head + tail strands) which looked like scattered bugs up close. The tails
+  // are dropped; one fat bead per lipid, big enough that neighbours merge.
+  const beadT = [0.0];
+  const beadR = [13];
+  const beadH = [1];
+  const per = 1;
+  // The membrane is always drawn (not under the molecule draw budget); subsample
+  // a bit on mobile to keep it light on the Quest.
+  const targetLipids = IS_MOBILE ? 14000 : Infinity;
   const stride = Math.max(1, Math.ceil(placements.length / targetLipids));
   const cap = Math.floor(MEMBRANE_MAX_POINTS / per);
   const lipids = [];
