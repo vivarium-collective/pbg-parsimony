@@ -2016,12 +2016,17 @@ async function _fetchStructureAtoms(src) {
 }
 async function showAtomicStructure(entry, worldMatrix) {
   const src = metaFor(entry).structure;
-  if (!src) return; // no public structure → keep the mesh
+  if (!src) { console.log("[viewer] no public structure for", entry.name); return; }
   const token = ++_structToken;
   const wm = worldMatrix.clone();
   let atoms;
   try { atoms = await _fetchStructureAtoms(src); }
-  catch (e) { console.warn("[viewer] structure fetch failed", src, e); return; }
+  catch (e) {
+    console.warn("[viewer] structure fetch failed", src, e);
+    const el = document.getElementById("info-structure");
+    if (el) el.innerHTML = `<span style="color:#e6667f">structure ${escapeHtml(String(src.id))} failed to load</span>`;
+    return;
+  }
   // Bail if the selection changed while we were fetching.
   if (!atoms || token !== _structToken || selectedName !== entry.name) return;
   const nAtoms = atoms.length / 3;
@@ -2038,6 +2043,10 @@ async function showAtomicStructure(entry, worldMatrix) {
   clearAtoms();
   scene.add(inst);
   selectedAtoms = inst;
+  const at = wm.elements;  // world translation of the instance (for an alignment sanity check)
+  console.log(`[viewer] atomic structure ${src.id}: ${nAtoms} atoms at [${at[12].toFixed(0)}, ${at[13].toFixed(0)}, ${at[14].toFixed(0)}]`);
+  const el = document.getElementById("info-structure");
+  if (el) el.innerHTML = `atomic structure: <span class="num">${escapeHtml(String(src.id))}</span> · <span class="num">${nAtoms.toLocaleString()}</span> atoms`;
 }
 // Outline + select a specific instance. worldMatrix places the hull; geometry
 // is the picked instance's geometry (or a fallback sphere for legend picks).
@@ -2097,6 +2106,9 @@ function renderInfoPanel(e) {
     + `<div class="info-cat"><span class="dot" style="background:${color}"></span>${escapeHtml(cat)}</div>`
     + `<div class="info-stat"><span class="num">${count.toLocaleString()}</span> copies placed</div>`
     + `<div class="info-stat">size: ~<span class="num">${radius}</span> Å radius</div>`
+    + `<div class="info-stat" id="info-structure">${m.structure
+        ? `atomic structure: <span class="num">${escapeHtml(String(m.structure.id))}</span> (loading…)`
+        : `<span style="color:var(--text-dim)">no public structure (assembled complex)</span>`}</div>`
     + `<div class="info-actions">`
     + (url ? `<a class="info-link" href="${url}" target="_blank" rel="noopener">EcoCyc entry ↗</a>`
            : `<span class="info-link" style="color:var(--text-dim)">no EcoCyc entry</span>`)
