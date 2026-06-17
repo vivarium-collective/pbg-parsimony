@@ -16,6 +16,8 @@
 //     are standing inside the cytoplasm (push together to shrink back out).
 //   • Controller thumbstick locomotion (secondary): left stick flies (head-
 //     relative), right stick X snap-turns, right stick Y scales the world.
+//   • Exit: the B (right) / Y (left) face button ends the session from inside
+//     the headset (the desktop "Exit VR" button is unreachable while immersed).
 //
 // The desktop OrbitControls / keyboard path is suspended for the duration of an
 // XR session and restored on exit.
@@ -252,6 +254,16 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
 
   function updateVR(dt) {
     if (!renderer.xr.isPresenting || !session) return false;
+
+    // In-headset exit: the desktop "Exit VR" button is unreachable while
+    // immersed, so map the B (right) / Y (left) face button to end the session.
+    for (const c of controllers) {
+      const gp = c.userData.inputSource && c.userData.inputSource.gamepad;
+      if (gp && gp.buttons && gp.buttons[5] && gp.buttons[5].pressed) {
+        try { session.end(); } catch (_) {}
+        return true;
+      }
+    }
 
     // Direct manipulation takes priority: while grabbing, skip stick locomotion
     // so the two don't fight.
