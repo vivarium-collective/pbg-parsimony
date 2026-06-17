@@ -1180,19 +1180,18 @@ async function buildScene(doc, fileName) {
   // placements whose desired LOD hasn't loaded yet); `reassessLODs`
   // partitions placements across the fallback and any loaded LOD
   // meshes on every camera change.
-  let lipidPlacements = null;
   for (const [tid, pts] of byType.entries()) {
     const ing = ingredientById.get(tid);
     if (!ing) continue;
-    // The lipid ingredient IS the membrane: render it as a combed head+tail
-    // bilayer (below), not plain spheres — so skip the normal instanced path.
-    if (ing.name === "lipid") { lipidPlacements = pts; continue; }
+    // The membrane is intentionally not rendered — explicit per-lipid glyphs
+    // never read as a convincing bilayer at whole-cell zoom, so we drop the
+    // lipid ingredient entirely and show only the molecular interior.
+    if (ing.name === "lipid") continue;
     const colorArr = ing.color || [0.5, 0.5, 0.5];
     const color = new THREE.Color(colorArr[0], colorArr[1], colorArr[2]);
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
     addInstancedType(ing, color, enc, pts);
   }
-  if (lipidPlacements) buildLipidMembrane(lipidPlacements);
   applyStyle();
 
   // Schedule the first LOD assessment now (loads coarse mesh per
