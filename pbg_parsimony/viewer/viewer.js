@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=45";
+import { initVR } from "./vr.js?v=46";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1989,11 +1989,11 @@ let collapsedCats = new Set();
 let selectedName = null;     // currently-selected ingredient (info panel + row highlight)
 let selectedHighlight = null; // the black inverted-hull outline mesh for the picked instance
 let selectedAnchor = null;    // world-space point the info box is pinned next to
-const CAT_ORDER = ["Replication", "Translation", "Transcription", "Nucleoid",
+const CAT_ORDER = ["Replication", "Division", "Translation", "Transcription", "Nucleoid",
                    "Metabolism", "Protein folding", "Envelope", "Motility",
                    "Regulation"];
 const CAT_COLOR = {
-  "Replication": "#ff7733", "Translation": "#f28c40", "Transcription": "#5a99f2",
+  "Replication": "#ff7733", "Division": "#33d9e6", "Translation": "#f28c40", "Transcription": "#5a99f2",
   "Nucleoid": "#d9bf73", "Metabolism": "#73cc80", "Protein folding": "#f2d94d",
   "Envelope": "#cc8cd9", "Regulation": "#e6667f", "Motility": "#40c7b8",
 };
