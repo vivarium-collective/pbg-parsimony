@@ -36,6 +36,10 @@ class Ingredient:
     proxy_voxel_size: float | None = None
     principal_vector: tuple | None = None
     lod_count: int = 4
+    mesh_lods: str | None = None  # override the voxel-size LOD list passed to the
+    #                               mesher (e.g. "16,8" for a big sparse object like
+    #                               a flagellum tube, whose fine LODs are slow +
+    #                               degenerate). None → the mesher default.
     pack_first: bool = False  # interior: pack in an early stage (before the small
     #                           molecules fragment the space) so large assemblies
     #                           reach their true count instead of being squeezed out.
@@ -82,6 +86,18 @@ class Chromosome:
     ter_marker: str | None = None    # ingredient id seated at the terminus (terC)
 
 
+def _public_structure(ref):
+    """Map an ingredient's StructureRef to the viewer info-box structure record
+    ({db, id[, fmt]}), or None for file-based composites (no single public PDB)."""
+    if ref is None:
+        return None
+    if ref.kind in ("pdb", "cif"):
+        return {"db": "rcsb", "id": ref.ref, "fmt": ref.kind}
+    if ref.kind == "alphafold":
+        return {"db": "alphafold", "id": ref.ref}
+    return None
+
+
 def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = None, *,
                out_dir, name: str = "model", scale: float = 1.0, proxy_lod: int = 2,
                cell_mesh=None) -> dict:
@@ -98,9 +114,10 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     big_ids = []  # interior ingredients to pack first (pack_first=True)
     surface_ids = []
 
-    def add_mesh(obj_id, ref, color, proxy=None, lod_count=4, principal_vector=None):
+    def add_mesh(obj_id, ref, color, proxy=None, lod_count=4, principal_vector=None,
+                 mesh_lods=None):
         path = fetch(ref, struct_cache, slug=obj_id)
-        stem = mesh_file(path, mesh_dir)
+        stem = mesh_file(path, mesh_dir, lods=mesh_lods) if mesh_lods else mesh_file(path, mesh_dir)
         lods = [f"meshes/{stem}.lod{i}.obj" for i in range(lod_count)
                 if (mesh_dir / f"{stem}.lod{i}.obj").exists()]
         if not lods:
@@ -118,13 +135,20 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         else:
             try:
                 if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count,
-                                ing.principal_vector):
+                                ing.principal_vector, ing.mesh_lods):
                     print(f"  skip {ing.id}: no LODs"); continue
             except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
                 print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue
         cnt = max(1, int(ing.count * scale)) if ing.count > 0 else 0
         sidecar[ing.id] = {"display_name": ing.display_name or ing.id,
                            "category": ing.category, "count": cnt}
+        # Record the public structure source so the viewer's info box can show the
+        # real all-atom structure (RCSB id / AlphaFold accession). File-based
+        # composites (assembled complexes, the flagellum) have no single public
+        # structure → omitted (the box shows "no public structure").
+        st = _public_structure(ing.structure)
+        if st:
+            sidecar[ing.id]["structure"] = st
         if cnt <= 0:
             # Marker-only object (e.g. the fork replisome): registered so the
             # chromosome stage can seat it at the replication forks, but not
