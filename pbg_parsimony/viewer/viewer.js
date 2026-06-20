@@ -1598,10 +1598,32 @@ function initSizeFilter() {
   const hi = document.getElementById("size-max");
   if (!radii.length) { if (lo) lo.disabled = true; if (hi) hi.disabled = true; return; }
   sizeDomainMin = Math.floor(Math.min(...radii));
-  sizeDomainMax = Math.ceil(Math.max(...radii));
+  // Cap the slider track at the next-biggest molecule when the largest is a far
+  // outlier (e.g. the flagellum, whose huge enclosing radius would otherwise
+  // squash every other molecule into the leftmost sliver of the track). Walk the
+  // distinct radii from the top and stop at the first that isn't >1.3× the one
+  // below it. The outlier is still shown by default — the max slider at its top
+  // means "no upper limit" (see onSizeFilterInput), so nothing is hidden.
+  const distinct = [...new Set(radii)].sort((a, b) => a - b);
+  let cap = distinct[distinct.length - 1];
+  for (let i = distinct.length - 1; i > 0; i--) {
+    if (distinct[i] > distinct[i - 1] * 1.3) cap = distinct[i - 1];
+    else break;
+  }
+  sizeDomainMax = Math.ceil(cap);
   if (sizeDomainMax <= sizeDomainMin) sizeDomainMax = sizeDomainMin + 1;
   sizeFilterMin = sizeDomainMin;
-  sizeFilterMax = sizeDomainMax;
+  // Default the upper bound to "no limit" so an outlier toggled back on (via its
+  // ingredient checkbox) isn't also blocked by the size filter.
+  sizeFilterMax = Infinity;
+  // Default-hide the outliers above the cap (e.g. the flagellum): they stay in
+  // the ingredient panel but start unchecked, so they're present to switch on
+  // rather than dominating the initial view.
+  if (Math.max(...radii) > sizeDomainMax + 1e-6) {
+    for (const e of instancedMeshes) {
+      if ((e.enclosingRadius || 0) > sizeDomainMax + 1e-6) e.visible = false;
+    }
+  }
   for (const s of [lo, hi]) {
     if (!s) continue;
     s.disabled = false;
@@ -1616,8 +1638,10 @@ function initSizeFilter() {
 function updateSizeFilterLabel() {
   const el = document.getElementById("size-range-value");
   if (!el) return;
-  const full = (sizeFilterMin <= sizeDomainMin + 1e-6 && sizeFilterMax >= sizeDomainMax - 1e-6);
-  el.textContent = Math.round(sizeFilterMin) + "–" + Math.round(sizeFilterMax) + " Å"
+  const unbounded = !isFinite(sizeFilterMax) || sizeFilterMax >= sizeDomainMax - 1e-6;
+  const full = (sizeFilterMin <= sizeDomainMin + 1e-6 && unbounded);
+  const hiLabel = unbounded ? Math.round(sizeDomainMax) + "+" : Math.round(sizeFilterMax);
+  el.textContent = Math.round(sizeFilterMin) + "–" + hiLabel + " Å"
     + (full ? " (all)" : "");
 }
 
@@ -2818,7 +2842,10 @@ function onSizeFilterInput() {
   const lo = parseFloat(sizeMinSlider.value);
   const hi = parseFloat(sizeMaxSlider.value);
   sizeFilterMin = Math.min(lo, hi);
-  sizeFilterMax = Math.max(lo, hi);
+  const hiVal = Math.max(lo, hi);
+  // At the top of the track there's no upper limit, so molecules above the
+  // capped domain (the flagellum outlier) keep showing.
+  sizeFilterMax = hiVal >= sizeDomainMax - 1e-6 ? Infinity : hiVal;
   updateSizeFilterLabel();
   applyVisibility();
   renderLegend();
