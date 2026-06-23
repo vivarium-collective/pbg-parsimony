@@ -1239,6 +1239,10 @@ async function buildScene(doc, fileName) {
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
     addInstancedType(ing, color, enc, pts);
   }
+  // Resolve default visibility (incl. default-hiding size outliers like the
+  // flagellum) BEFORE the first applyStyle()/applyVisibility(), so an outlier is
+  // never marked visible even momentarily — no render-flash before it's hidden.
+  initSizeFilter();
   applyStyle();
 
   // Schedule the first LOD assessment now (loads coarse mesh per
@@ -1260,7 +1264,6 @@ async function buildScene(doc, fileName) {
   bboxLines.visible = toggleBbox.checked; // off in the curated view
 
   framePacking(bbMin, bbMax);
-  initSizeFilter();
   // GPU-pragmatic default: a whole-cell pack is ~1M+ instances, too heavy to
   // draw every frame. Default the render to a representative uniform subsample
   // (~TARGET_DRAWN instances). The pack order is random, so a fraction is an
@@ -1351,6 +1354,11 @@ function makeFallbackSphere(ing, color, enclosingRadius, placementCount) {
   for (const mesh of [standardMesh, celMesh]) {
     mesh.frustumCulled = false; // we cull per-instance ourselves
     mesh.count = 0;             // filled by reassessLODs
+    // Start hidden — applyVisibility() turns on only the entries that should
+    // show. THREE meshes default to visible=true, which let a default-hidden
+    // outlier (e.g. the flagellum) flash for a frame before the size filter
+    // resolved; starting off closes that window.
+    mesh.visible = false;
     scene.add(mesh);
   }
   return { standardMesh, celMesh };
@@ -1476,6 +1484,7 @@ function ensureLodMesh(entry, levelIdx, geom, robustR) {
     for (const mesh of [standard, cel]) {
       mesh.frustumCulled = false;
       mesh.count = 0;
+      mesh.visible = false; // applyStyle below sets the real value; never flash on
       if (clippingPlane) {
         mesh.material.clippingPlanes = [clippingPlane];
         mesh.material.needsUpdate = true;
