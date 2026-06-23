@@ -3244,11 +3244,28 @@ demoPicker.addEventListener("change", () => {
 // Load a model = its ingredient-metadata sidecar (display names + categories)
 // then the pack. The sidecar is the pack path with .pack.json → .meta.json.
 async function loadModel(file) {
-  const metaFile = file.replace(/\.pack\.json$/, ".meta.json");
+  // Derive the meta sidecar URL, preserving any cache-bust query (e.g.
+  // ".../ecoli_3d.pack.json?v=2" → ".../ecoli_3d.meta.json?v=2"). Without the
+  // optional query group the replace would no-op on a versioned URL and we'd
+  // fetch the pack as the sidecar — losing all category metadata ("Other").
+  const metaFile = file.replace(/\.pack\.json(\?.*)?$/, ".meta.json$1");
   ingredientMeta = {};
   try {
     const r = await fetch(metaFile);
-    if (r.ok) { const j = await r.json(); ingredientMeta = j.ingredients || {}; }
+    if (r.ok) {
+      const j = await r.json();
+      // Guard: the sidecar is an object map {name: {display_name, category}}
+      // (optionally wrapped in {ingredients:{…}}), NOT a pack. If a URL-derivation
+      // bug made us fetch the PACK here (its `ingredients` is an ARRAY + it has a
+      // `placements` field), using it would silently wipe every display name +
+      // category → BioCyc ids under "Other". Reject it loudly instead.
+      const looksLikePack = Array.isArray(j.ingredients) || "placements" in j || j.format === "parsimony.pack.v1";
+      if (looksLikePack) {
+        console.error(`meta sidecar URL returned a pack, not metadata (${metaFile}) — keeping display names + categories from the previous load; check the .pack.json→.meta.json URL rewrite`);
+      } else {
+        ingredientMeta = j.ingredients || j || {};
+      }
+    }
   } catch (e) {
     console.warn("ingredient metadata sidecar not found:", e);
   }
