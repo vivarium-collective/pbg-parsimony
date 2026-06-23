@@ -1239,6 +1239,10 @@ async function buildScene(doc, fileName) {
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
     addInstancedType(ing, color, enc, pts);
   }
+  // Resolve default visibility (incl. default-hiding size outliers like the
+  // flagellum) BEFORE the first applyStyle()/applyVisibility(), so an outlier is
+  // never marked visible even momentarily — no render-flash before it's hidden.
+  initSizeFilter();
   applyStyle();
 
   // Schedule the first LOD assessment now (loads coarse mesh per
@@ -1260,7 +1264,6 @@ async function buildScene(doc, fileName) {
   bboxLines.visible = toggleBbox.checked; // off in the curated view
 
   framePacking(bbMin, bbMax);
-  initSizeFilter();
   // GPU-pragmatic default: a whole-cell pack is ~1M+ instances, too heavy to
   // draw every frame. Default the render to a representative uniform subsample
   // (~TARGET_DRAWN instances). The pack order is random, so a fraction is an
@@ -1351,6 +1354,11 @@ function makeFallbackSphere(ing, color, enclosingRadius, placementCount) {
   for (const mesh of [standardMesh, celMesh]) {
     mesh.frustumCulled = false; // we cull per-instance ourselves
     mesh.count = 0;             // filled by reassessLODs
+    // Start hidden — applyVisibility() turns on only the entries that should
+    // show. THREE meshes default to visible=true, which let a default-hidden
+    // outlier (e.g. the flagellum) flash for a frame before the size filter
+    // resolved; starting off closes that window.
+    mesh.visible = false;
     scene.add(mesh);
   }
   return { standardMesh, celMesh };
@@ -1476,6 +1484,7 @@ function ensureLodMesh(entry, levelIdx, geom, robustR) {
     for (const mesh of [standard, cel]) {
       mesh.frustumCulled = false;
       mesh.count = 0;
+      mesh.visible = false; // applyStyle below sets the real value; never flash on
       if (clippingPlane) {
         mesh.material.clippingPlanes = [clippingPlane];
         mesh.material.needsUpdate = true;
@@ -3235,11 +3244,28 @@ demoPicker.addEventListener("change", () => {
 // Load a model = its ingredient-metadata sidecar (display names + categories)
 // then the pack. The sidecar is the pack path with .pack.json → .meta.json.
 async function loadModel(file) {
-  const metaFile = file.replace(/\.pack\.json$/, ".meta.json");
+  // Derive the meta sidecar URL, preserving any cache-bust query (e.g.
+  // ".../ecoli_3d.pack.json?v=2" → ".../ecoli_3d.meta.json?v=2"). Without the
+  // optional query group the replace would no-op on a versioned URL and we'd
+  // fetch the pack as the sidecar — losing all category metadata ("Other").
+  const metaFile = file.replace(/\.pack\.json(\?.*)?$/, ".meta.json$1");
   ingredientMeta = {};
   try {
     const r = await fetch(metaFile);
-    if (r.ok) { const j = await r.json(); ingredientMeta = j.ingredients || {}; }
+    if (r.ok) {
+      const j = await r.json();
+      // Guard: the sidecar is an object map {name: {display_name, category}}
+      // (optionally wrapped in {ingredients:{…}}), NOT a pack. If a URL-derivation
+      // bug made us fetch the PACK here (its `ingredients` is an ARRAY + it has a
+      // `placements` field), using it would silently wipe every display name +
+      // category → BioCyc ids under "Other". Reject it loudly instead.
+      const looksLikePack = Array.isArray(j.ingredients) || "placements" in j || j.format === "parsimony.pack.v1";
+      if (looksLikePack) {
+        console.error(`meta sidecar URL returned a pack, not metadata (${metaFile}) — keeping display names + categories from the previous load; check the .pack.json→.meta.json URL rewrite`);
+      } else {
+        ingredientMeta = j.ingredients || j || {};
+      }
+    }
   } catch (e) {
     console.warn("ingredient metadata sidecar not found:", e);
   }

@@ -13,6 +13,18 @@ whole-cell model such as [v2ecoli](https://github.com/vivarium-collective/v2ecol
 provides those; pbg-parsimony does the structure resolution, recipe authoring,
 and packing.
 
+## See it live
+
+**[Explore a 3D whole-cell *E. coli* model in your browser →](https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/viewer/index.html?models=https://pub-eb913fbbdc584bd7add047c823570b13.r2.dev/ecoli-3d/viz/3d/models.json)**
+
+Hundreds of molecular species packed at true abundance from a
+[v2ecoli](https://github.com/vivarium-collective/v2ecoli) cell state — ribosomes,
+RNA polymerase, metabolic enzymes, the supercoiled chromosome, flagella. Switch
+between a **newborn cell** and a **pre-division cell** (two segregated,
+daughter-centered chromosomes), toggle/isolate species by functional category,
+and **"View in VR"** on a Meta Quest. This whole scene is built by pbg-parsimony
+and rendered in the bundled viewer (`pbg_parsimony/viewer/`).
+
 ## What it does
 
 1. **Resolve structures** — RCSB PDB / mmCIF (large assemblies) or AlphaFold DB
