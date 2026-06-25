@@ -84,6 +84,9 @@ class Chromosome:
     fork_marker: str | None = None
     oric_marker: str | None = None   # ingredient id seated at each origin (oriC)
     ter_marker: str | None = None    # ingredient id seated at the terminus (terC)
+    rnaps: list = field(default_factory=list)  # explicit RNAP placements: list of
+    #   {"coordinates": int, "domain_index": int, "is_forward": bool}
+    rnap_marker: str | None = None   # ingredient id used to render each RNAP
 
 
 def _public_structure(ref):
@@ -186,6 +189,10 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             chrom_block["oric_marker"] = chromosome.oric_marker
         if chromosome.ter_marker:
             chrom_block["ter_marker"] = chromosome.ter_marker
+        if chromosome.rnaps:
+            chrom_block["rnaps"] = chromosome.rnaps
+        if chromosome.rnap_marker:
+            chrom_block["rnap_marker"] = chromosome.rnap_marker
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
