@@ -87,6 +87,10 @@ class Chromosome:
     rnaps: list = field(default_factory=list)  # explicit RNAP placements: list of
     #   {"coordinates": int, "domain_index": int, "is_forward": bool}
     rnap_marker: str | None = None   # ingredient id used to render each RNAP
+    rnas: list = field(default_factory=list)  # nascent RNA placements: list of
+    #   {"root_coordinate": int, "root_domain": int, "length_nt": int, "is_mRNA": bool}
+    rna_segment: str | None = None   # ingredient id used to render each nascent RNA bead
+    rna_angstrom_per_nt: float = 2.0  # strand contour length per nucleotide (Å)
 
 
 def _public_structure(ref):
@@ -193,6 +197,11 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             chrom_block["rnaps"] = chromosome.rnaps
         if chromosome.rnap_marker:
             chrom_block["rnap_marker"] = chromosome.rnap_marker
+        if chromosome.rnas:
+            chrom_block["rnas"] = chromosome.rnas
+        if chromosome.rna_segment:
+            chrom_block["rna_segment"] = chromosome.rna_segment
+            chrom_block["rna_angstrom_per_nt"] = chromosome.rna_angstrom_per_nt
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
