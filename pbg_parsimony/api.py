@@ -88,10 +88,13 @@ class Chromosome:
     #   {"coordinates": int, "domain_index": int, "is_forward": bool}
     rnap_marker: str | None = None   # ingredient id used to render each RNAP
     rnas: list = field(default_factory=list)  # nascent RNA placements: list of
-    #   {"root_coordinate": int, "root_domain": int, "length_nt": int, "is_mRNA": bool}
+    #   {"root_coordinate": int, "root_domain": int, "length_nt": int, "is_mRNA": bool, "unique_index": int}
     rna_segment: str | None = None   # ingredient id used to render each nascent RNA bead
     rna_segment_free: str | None = None  # ingredient id for free (released) mRNA strands
     rna_angstrom_per_nt: float = 2.0  # strand contour length per nucleotide (Å)
+    ribosomes: list = field(default_factory=list)  # explicit ribosome placements: list of
+    #   {"mRNA_index": int, "pos_on_mRNA": int, "peptide_length": int}
+    ribosome_marker: str | None = None  # ingredient id instanced at each ribosome position
 
 
 def _public_structure(ref):
@@ -205,6 +208,10 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             chrom_block["rna_angstrom_per_nt"] = chromosome.rna_angstrom_per_nt
         if chromosome.rna_segment_free:
             chrom_block["rna_segment_free"] = chromosome.rna_segment_free
+        if chromosome.ribosomes:
+            chrom_block["ribosomes"] = chromosome.ribosomes
+        if chromosome.ribosome_marker:
+            chrom_block["ribosome_marker"] = chromosome.ribosome_marker
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
