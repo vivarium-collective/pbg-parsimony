@@ -97,6 +97,13 @@ class Chromosome:
     ribosome_marker: str | None = None  # ingredient id instanced at each ribosome position
     peptide_segment: str | None = None  # ingredient id instanced as each nascent peptide coil
     peptide_angstrom_per_aa: float = 3.0  # peptide contour length per amino acid (Å)
+    # Septum constriction for a dividing cell. ``septum_depth`` is the fractional
+    # radius reduction at midcell (0 = no taper; 0.5–0.7 = visible waist).
+    # ``septum_width`` is the Gaussian σ in the same units as the capsule radius (Å).
+    # When ``septum_depth > 0`` the packer's free-mRNA sampling and ribosome/peptide
+    # confinement respect the tapered boundary instead of the full-width capsule.
+    septum_depth: float = 0.0
+    septum_width: float = 0.0
 
 
 def _public_structure(ref):
@@ -217,6 +224,9 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         if chromosome.peptide_segment:
             chrom_block["peptide_segment"] = chromosome.peptide_segment
             chrom_block["peptide_angstrom_per_aa"] = chromosome.peptide_angstrom_per_aa
+        if chromosome.septum_depth > 0:
+            chrom_block["septum_depth"] = chromosome.septum_depth
+            chrom_block["septum_width"] = chromosome.septum_width
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
