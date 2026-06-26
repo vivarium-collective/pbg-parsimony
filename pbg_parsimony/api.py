@@ -95,6 +95,8 @@ class Chromosome:
     ribosomes: list = field(default_factory=list)  # explicit ribosome placements: list of
     #   {"mRNA_index": int, "pos_on_mRNA": int, "peptide_length": int}
     ribosome_marker: str | None = None  # ingredient id instanced at each ribosome position
+    peptide_segment: str | None = None  # ingredient id instanced as each nascent peptide coil
+    peptide_angstrom_per_aa: float = 3.0  # peptide contour length per amino acid (Å)
 
 
 def _public_structure(ref):
@@ -212,6 +214,9 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             chrom_block["ribosomes"] = chromosome.ribosomes
         if chromosome.ribosome_marker:
             chrom_block["ribosome_marker"] = chromosome.ribosome_marker
+        if chromosome.peptide_segment:
+            chrom_block["peptide_segment"] = chromosome.peptide_segment
+            chrom_block["peptide_angstrom_per_aa"] = chromosome.peptide_angstrom_per_aa
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
