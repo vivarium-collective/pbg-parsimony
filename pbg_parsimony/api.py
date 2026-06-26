@@ -90,6 +90,7 @@ class Chromosome:
     rnas: list = field(default_factory=list)  # nascent RNA placements: list of
     #   {"root_coordinate": int, "root_domain": int, "length_nt": int, "is_mRNA": bool}
     rna_segment: str | None = None   # ingredient id used to render each nascent RNA bead
+    rna_segment_free: str | None = None  # ingredient id for free (released) mRNA strands
     rna_angstrom_per_nt: float = 2.0  # strand contour length per nucleotide (Å)
 
 
@@ -202,6 +203,8 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         if chromosome.rna_segment:
             chrom_block["rna_segment"] = chromosome.rna_segment
             chrom_block["rna_angstrom_per_nt"] = chromosome.rna_angstrom_per_nt
+        if chromosome.rna_segment_free:
+            chrom_block["rna_segment_free"] = chromosome.rna_segment_free
         if genome_rel:
             chrom_block["genome"] = genome_rel
         sidecar[chromosome.segment_id] = {
