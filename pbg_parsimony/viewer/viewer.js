@@ -1537,14 +1537,14 @@ let interiorFraction = 1.0;
 // Target number of drawn instances for the default view — a GPU-friendly load
 // that still reads as a crowded cell. Whole-cell packs (~1M+) are subsampled
 // down to this; smaller packs render in full.
-const TARGET_DRAWN = 250000;
+const TARGET_DRAWN = 75000;
 // Mobile GPUs (Meta Quest browser, phones/tablets) are far weaker than a
 // desktop and lag out at the desktop draw budget even in flat (non-VR) mode, so
 // cap the flat budget much lower there too. The Quest browser UA carries both
 // "OculusBrowser" and "Quest"/"Android".
 const IS_MOBILE = typeof navigator !== "undefined"
   && /OculusBrowser|Quest|Mobile|Android|iPhone|iPad/i.test(navigator.userAgent || "");
-const FLAT_TARGET_DRAWN = IS_MOBILE ? 45000 : TARGET_DRAWN;
+const FLAT_TARGET_DRAWN = IS_MOBILE ? 30000 : TARGET_DRAWN;
 // Was 10 px on mobile, which left almost everything as egg-shaped proxies — no
 // real mesh shapes ever loaded. The DPR cap freed up enough headroom to use the
 // desktop threshold, so actual molecular shapes render when zoomed in.
@@ -1576,7 +1576,7 @@ function applyAdaptiveShowFraction(totalPlacements) {
   const target = vr ? VR_TARGET_DRAWN : FLAT_TARGET_DRAWN;
   let pct = (target / totalPlacements) * 100;
   pct = vr ? Math.min(100, Math.max(1, Math.round(pct)))
-           : Math.min(100, Math.max(5, Math.round(pct / 5) * 5));
+           : Math.min(100, Math.max(1, Math.round(pct)));
   interiorFraction = pct / 100;
   const slider = document.getElementById("show-fraction");
   const val = document.getElementById("show-fraction-value");
