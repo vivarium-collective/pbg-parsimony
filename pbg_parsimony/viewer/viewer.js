@@ -37,10 +37,6 @@ const sliceAxis = document.getElementById("slice-axis");
 const slicePos = document.getElementById("slice-pos");
 const slicePosValue = document.getElementById("slice-pos-value");
 const sliceFlip = document.getElementById("slice-flip");
-const sliceAzimuth = document.getElementById("slice-azimuth");
-const sliceElevation = document.getElementById("slice-elevation");
-const sliceAzimuthValue = document.getElementById("slice-azimuth-value");
-const sliceElevationValue = document.getElementById("slice-elevation-value");
 // Preset → (azimuth°, elevation°) for the section-plane normal.
 const SLICE_PRESETS = {
   "horizontal": [0, 90],    // normal +Y → a horizontal cut
@@ -2579,30 +2575,16 @@ function applyOutlineWidth(pixels) {
 
 function applyClippingPlane() {
   const mode = sliceAxis.value;
-  // Oblique → the azimuth/elevation sliders are live; presets drive them too.
-  const obl = mode === "oblique";
-  if (sliceAzimuth) sliceAzimuth.disabled = !obl;
-  if (sliceElevation) sliceElevation.disabled = !obl;
   if (!mode) {
     renderer.clippingPlanes = [];
     clippingPlane = null;
     setMaterialClipping([]);
     return;
   }
-  // Plane orientation from azimuth (around vertical Y) + elevation (tilt). A
-  // preset sets the sliders; "oblique" reads them directly. el=90 → normal +Y
-  // (horizontal cut); el=0,az=90 → +X; el=0,az=0 → +Z.
-  let azDeg, elDeg;
-  if (obl) {
-    azDeg = parseFloat(sliceAzimuth.value);
-    elDeg = parseFloat(sliceElevation.value);
-  } else {
-    [azDeg, elDeg] = SLICE_PRESETS[mode] || [0, 90];
-    if (sliceAzimuth) sliceAzimuth.value = String(azDeg);
-    if (sliceElevation) sliceElevation.value = String(elDeg);
-  }
-  if (sliceAzimuthValue) sliceAzimuthValue.textContent = `${Math.round(azDeg)}°`;
-  if (sliceElevationValue) sliceElevationValue.textContent = `${Math.round(elDeg)}°`;
+  // Plane orientation from the preset's azimuth (around vertical Y) + elevation
+  // (tilt): el=90 → normal +Y (horizontal cut); el=0,az=90 → +X (across the
+  // rod); el=0,az=0 → +Z (along the rod).
+  const [azDeg, elDeg] = SLICE_PRESETS[mode] || [0, 90];
   const az = THREE.MathUtils.degToRad(azDeg), el = THREE.MathUtils.degToRad(elDeg);
   const ce = Math.cos(el);
   const normal = new THREE.Vector3(ce * Math.sin(az), Math.sin(el), ce * Math.cos(az)).normalize();
@@ -2797,8 +2779,6 @@ if (toggleMembrane) {
 sliceAxis.addEventListener("change", applyClippingPlane);
 slicePos.addEventListener("input", applyClippingPlane);
 sliceFlip.addEventListener("change", applyClippingPlane);
-if (sliceAzimuth) sliceAzimuth.addEventListener("input", applyClippingPlane);
-if (sliceElevation) sliceElevation.addEventListener("input", applyClippingPlane);
 
 // Style radio buttons + outline width slider.
 const outlineRow = document.getElementById("outline-row");
