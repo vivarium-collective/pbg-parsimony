@@ -1113,7 +1113,7 @@ function buildLipidMembrane(placements) {
   // (head + tail strands) which looked like scattered bugs up close. The tails
   // are dropped; one fat bead per lipid, big enough that neighbours merge.
   const beadT = [0.0];
-  const beadR = [13];
+  const beadR = [24];   // fat heads so neighbours merge into a continuous band
   const beadH = [1];
   const per = 1;
   // The membrane is always drawn (not under the molecule draw budget); subsample
@@ -1227,18 +1227,25 @@ async function buildScene(doc, fileName) {
   // placements whose desired LOD hasn't loaded yet); `reassessLODs`
   // partitions placements across the fallback and any loaded LOD
   // meshes on every camera change.
+  // Membranes: the tiled lipid leaflets (lipid / lipid_im_* / lipid_om_*) are
+  // collected and rendered as dense combed bilayer bands by buildLipidMembrane —
+  // far more membrane-like than drawing each lipid as a proxy sphere. Each
+  // membrane's leaflets sit at their own radius, so passing them together yields
+  // one band per membrane (inner + outer).
+  const lipidPlacements = [];
   for (const [tid, pts] of byType.entries()) {
     const ing = ingredientById.get(tid);
     if (!ing) continue;
-    // The membrane is intentionally not rendered — explicit per-lipid glyphs
-    // never read as a convincing bilayer at whole-cell zoom, so we drop the
-    // lipid ingredient entirely and show only the molecular interior.
-    if (ing.name === "lipid") continue;
+    if (/^lipid(_|$)/.test(ing.name)) {
+      for (const p of pts) lipidPlacements.push(p);
+      continue;
+    }
     const colorArr = ing.color || [0.5, 0.5, 0.5];
     const color = new THREE.Color(colorArr[0], colorArr[1], colorArr[2]);
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
     addInstancedType(ing, color, enc, pts);
   }
+  if (lipidPlacements.length) buildLipidMembrane(lipidPlacements);
   // Resolve default visibility (incl. default-hiding size outliers like the
   // flagellum) BEFORE the first applyStyle()/applyVisibility(), so an outlier is
   // never marked visible even momentarily — no render-flash before it's hidden.
