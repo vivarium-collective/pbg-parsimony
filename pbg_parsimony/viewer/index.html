@@ -322,10 +322,20 @@
         <span id="mesh-budget-value"></span>
         <input type="range" id="sphere-budget" min="3" max="60" step="1" value="6">
         <span id="sphere-budget-value"></span>
-        <select id="slice-axis"><option value="">none</option></select>
+        <select id="slice-axis">
+          <option value="">none</option>
+          <option value="horizontal">Horizontal</option>
+          <option value="vertical-x">Vertical (across)</option>
+          <option value="vertical-z">Vertical (along)</option>
+          <option value="oblique">Oblique</option>
+        </select>
         <input type="range" id="slice-pos" min="-1" max="1" step="0.005" value="0">
         <span id="slice-pos-value"></span>
         <input type="checkbox" id="slice-flip">
+        <input type="range" id="slice-azimuth" min="0" max="360" step="1" value="45">
+        <span id="slice-azimuth-value"></span>
+        <input type="range" id="slice-elevation" min="-90" max="90" step="1" value="35">
+        <span id="slice-elevation-value"></span>
         <div id="outline-row"><input type="range" id="outline-width" min="0" max="4" step="0.25" value="1.5"><span id="outline-width-value"></span></div>
       </div>
     </aside>

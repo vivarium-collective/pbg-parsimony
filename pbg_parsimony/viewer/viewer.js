@@ -37,6 +37,16 @@ const sliceAxis = document.getElementById("slice-axis");
 const slicePos = document.getElementById("slice-pos");
 const slicePosValue = document.getElementById("slice-pos-value");
 const sliceFlip = document.getElementById("slice-flip");
+const sliceAzimuth = document.getElementById("slice-azimuth");
+const sliceElevation = document.getElementById("slice-elevation");
+const sliceAzimuthValue = document.getElementById("slice-azimuth-value");
+const sliceElevationValue = document.getElementById("slice-elevation-value");
+// Preset → (azimuth°, elevation°) for the section-plane normal.
+const SLICE_PRESETS = {
+  "horizontal": [0, 90],    // normal +Y → a horizontal cut
+  "vertical-x": [90, 0],    // normal +X → cross-section across the rod
+  "vertical-z": [0, 0],     // normal +Z → lengthwise cut
+};
 
 // ───── three.js scene ───────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -2568,37 +2578,62 @@ function applyOutlineWidth(pixels) {
 }
 
 function applyClippingPlane() {
-  const axis = sliceAxis.value;
-  if (!axis) {
+  const mode = sliceAxis.value;
+  // Oblique → the azimuth/elevation sliders are live; presets drive them too.
+  const obl = mode === "oblique";
+  if (sliceAzimuth) sliceAzimuth.disabled = !obl;
+  if (sliceElevation) sliceElevation.disabled = !obl;
+  if (!mode) {
     renderer.clippingPlanes = [];
     clippingPlane = null;
+    setMaterialClipping([]);
     return;
   }
-  const normal = new THREE.Vector3(
-    axis === "x" ? 1 : 0,
-    axis === "y" ? 1 : 0,
-    axis === "z" ? 1 : 0,
-  );
+  // Plane orientation from azimuth (around vertical Y) + elevation (tilt). A
+  // preset sets the sliders; "oblique" reads them directly. el=90 → normal +Y
+  // (horizontal cut); el=0,az=90 → +X; el=0,az=0 → +Z.
+  let azDeg, elDeg;
+  if (obl) {
+    azDeg = parseFloat(sliceAzimuth.value);
+    elDeg = parseFloat(sliceElevation.value);
+  } else {
+    [azDeg, elDeg] = SLICE_PRESETS[mode] || [0, 90];
+    if (sliceAzimuth) sliceAzimuth.value = String(azDeg);
+    if (sliceElevation) sliceElevation.value = String(elDeg);
+  }
+  if (sliceAzimuthValue) sliceAzimuthValue.textContent = `${Math.round(azDeg)}°`;
+  if (sliceElevationValue) sliceElevationValue.textContent = `${Math.round(elDeg)}°`;
+  const az = THREE.MathUtils.degToRad(azDeg), el = THREE.MathUtils.degToRad(elDeg);
+  const ce = Math.cos(el);
+  const normal = new THREE.Vector3(ce * Math.sin(az), Math.sin(el), ce * Math.cos(az)).normalize();
   if (sliceFlip.checked) normal.negate();
-  const t = parseFloat(slicePos.value);
   if (!dataBounds) return;
+  // Position the plane along its own normal: project the 8 bbox corners onto the
+  // normal to get the world range the slider spans (works for any orientation).
   const bbMin = dataBounds.min, bbMax = dataBounds.max;
-  const lo = axis === "x" ? bbMin[0] : axis === "y" ? bbMin[1] : bbMin[2];
-  const hi = axis === "x" ? bbMax[0] : axis === "y" ? bbMax[1] : bbMax[2];
-  const worldPos = lo + (hi - lo) * (t * 0.5 + 0.5);
-  slicePosValue.textContent = worldPos.toFixed(1);
-  // Plane equation: normal · p + constant = 0; we keep points where
-  // dot(normal, p) ≤ -constant. So constant = -dot(normal, planePoint).
-  const planePoint = new THREE.Vector3(
-    axis === "x" ? worldPos : 0,
-    axis === "y" ? worldPos : 0,
-    axis === "z" ? worldPos : 0,
-  );
-  const constant = -normal.dot(planePoint);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    const c = new THREE.Vector3(
+      (i & 1) ? bbMax[0] : bbMin[0],
+      (i & 2) ? bbMax[1] : bbMin[1],
+      (i & 4) ? bbMax[2] : bbMin[2]);
+    const d = normal.dot(c);
+    if (d < lo) lo = d; if (d > hi) hi = d;
+  }
+  const t = parseFloat(slicePos.value);
+  const d = lo + (hi - lo) * (t * 0.5 + 0.5);   // signed distance along the normal
+  slicePosValue.textContent = d.toFixed(0);
+  // Keep points where normal·p ≤ d  ⇒  THREE.Plane(normal, -d).
+  const constant = -d;
   clippingPlane = new THREE.Plane(normal, constant);
   renderer.clippingPlanes = [clippingPlane];
-  // Re-apply per-material clipping for every variant (fallback +
-  // each loaded LOD pair).
+  setMaterialClipping([clippingPlane]);
+}
+
+// Apply a clipping-plane list to every ingredient material variant (fallback +
+// each loaded LOD pair). `[]` removes the section (materials override the
+// renderer-level planes, so they must be cleared explicitly when turning off).
+function setMaterialClipping(planes) {
   for (const e of instancedMeshes) {
     const variants = [e.fallbackSphere.standardMesh, e.fallbackSphere.celMesh];
     if (e.lods) {
@@ -2607,7 +2642,7 @@ function applyClippingPlane() {
       }
     }
     for (const m of variants) {
-      m.material.clippingPlanes = [clippingPlane];
+      m.material.clippingPlanes = planes;
       m.material.needsUpdate = true;
     }
   }
@@ -2762,6 +2797,8 @@ if (toggleMembrane) {
 sliceAxis.addEventListener("change", applyClippingPlane);
 slicePos.addEventListener("input", applyClippingPlane);
 sliceFlip.addEventListener("change", applyClippingPlane);
+if (sliceAzimuth) sliceAzimuth.addEventListener("input", applyClippingPlane);
+if (sliceElevation) sliceElevation.addEventListener("input", applyClippingPlane);
 
 // Style radio buttons + outline width slider.
 const outlineRow = document.getElementById("outline-row");
