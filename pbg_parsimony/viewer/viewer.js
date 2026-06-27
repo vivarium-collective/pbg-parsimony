@@ -377,11 +377,14 @@ function clearPacking() {
 const CEL_VERTEX_SHADER = `
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
+#include <clipping_planes_pars_vertex>
 void main() {
   vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
   vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
   vWorldPos = worldPos.xyz;
-  gl_Position = projectionMatrix * viewMatrix * worldPos;
+  vec4 mvPosition = viewMatrix * worldPos;   // view-space pos, needed by the clip chunk
+  #include <clipping_planes_vertex>
+  gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
@@ -390,7 +393,9 @@ varying vec3 vNormalW;
 varying vec3 vWorldPos;
 uniform vec3 uColor;
 uniform vec3 uLightDir;
+#include <clipping_planes_pars_fragment>
 void main() {
+  #include <clipping_planes_fragment>
   vec3 N = normalize(vNormalW);
   vec3 V = normalize(cameraPosition - vWorldPos);
   float NdotL = dot(N, normalize(uLightDir));
@@ -423,6 +428,7 @@ function makeCelMaterial(color) {
     depthTest: true,
     depthWrite: true,
     transparent: false,
+    clipping: true,   // honor renderer/material clippingPlanes (section tool)
   });
 }
 
