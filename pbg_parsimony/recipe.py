@@ -4,10 +4,14 @@ from __future__ import annotations
 LOD_VOXELS = [16.0, 8.0, 4.0, 2.5]
 
 
-def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None):
+def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None,
+                 packing_mode=None, surface_offset=None):
     """A mesh ingredient object for the recipe ``objects`` map. ``principal_vector``
     (a local axis) is aligned to the surface normal by the engine during surface
-    placement — e.g. a flagellum's whip axis pointing outward from the envelope."""
+    placement — e.g. a flagellum's whip axis pointing outward from the envelope.
+    ``packing_mode`` (``"tiled"`` → even Fibonacci surface layer, e.g. a lipid
+    leaflet) and ``surface_offset`` (Å along the outward normal, e.g. a bilayer
+    leaflet at ±δ or a membrane protein's depth) feed surface placement."""
     o = {
         "type": "mesh",
         "color": [float(c) for c in color],
@@ -18,6 +22,10 @@ def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None)
         o["proxy_voxel_size"] = float(proxy_voxel_size)
     if principal_vector is not None:
         o["principal_vector"] = [float(v) for v in principal_vector]
+    if packing_mode and packing_mode != "random":
+        o["packing_mode"] = packing_mode
+    if surface_offset:
+        o["surface_offset"] = float(surface_offset)
     return o
 
 
