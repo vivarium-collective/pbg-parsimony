@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveGrab, makeMotionGate, makeAdaptiveBudget } from "./vr-helpers.js";
+import { resolveGrab, makeMotionGate, makeAdaptiveBudget, vignetteIntensity } from "./vr-helpers.js";
 
 test("resolveGrab: trigger pressed grabs", () => {
   assert.equal(resolveGrab({ buttons: [{ pressed: true }, { pressed: false }] }, null), true);
@@ -87,4 +87,20 @@ test("makeAdaptiveBudget: clamps at max — no growth past initial when already 
   // value starts at 1000 = max; high fps cannot grow past max
   assert.equal(b.update(80), false);
   assert.equal(b.value, 1000);
+});
+
+test("vignetteIntensity: zero motion → zero", () => {
+  assert.equal(vignetteIntensity(0), 0);
+});
+
+test("vignetteIntensity: full motion → maxIntensity", () => {
+  assert.equal(vignetteIntensity(1), 0.6);
+});
+
+test("vignetteIntensity: clamps above maxAt", () => {
+  assert.equal(vignetteIntensity(5), 0.6);
+});
+
+test("vignetteIntensity: respects custom opts", () => {
+  assert.equal(vignetteIntensity(0.5, { maxAt: 1, maxIntensity: 0.4 }), 0.2);
 });

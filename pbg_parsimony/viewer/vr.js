@@ -23,14 +23,14 @@
 // XR session and restored on exit.
 
 import * as THREE from "three";
-import { resolveGrab, makeMotionGate } from "./vr-helpers.js";
+import { resolveGrab, makeMotionGate, vignetteIntensity } from "./vr-helpers.js";
 
 // --- VR scene framing (Ångström units) ---------------------------------------
 // WORLD_SCALE: Å per "head metre". 1500 makes the ~20,000 Å cell read like a
 // ~13 m room-sized object with sensible stereo depth; the right stick tunes it.
 const WORLD_SCALE = 1500;
 const START_BACK = 16000;     // Å the player starts back from cell centre (z+)
-const FLY_SPEED = 1.2;        // head-metres / second at full stick deflection (gentle)
+const FLY_SPEED = 0.7;        // head-metres / second at full stick deflection (gentler; grab is primary)
 const SCALE_RATE = 0.6;       // world-scale change / second at full deflection
 const SCALE_MIN = 150;        // clamp world scale so you can't shrink/grow into black
                              // (lower = cell can grow bigger → deeper "inside")
@@ -60,6 +60,25 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     c.addEventListener("selectend", () => { c.userData.pinching = false; });
     dolly.add(c);
   }
+
+  // Comfort vignette: a head-locked quad with a radial-alpha shader. Opacity is
+  // driven each frame by smooth-motion magnitude (0 while still or grabbing).
+  const vignetteMat = new THREE.ShaderMaterial({
+    transparent: true, depthTest: false, depthWrite: false,
+    uniforms: { uOpacity: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `
+      varying vec2 vUv; uniform float uOpacity;
+      void main(){
+        float d = distance(vUv, vec2(0.5));
+        float a = smoothstep(0.30, 0.50, d) * uOpacity;
+        gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+      }`,
+  });
+  const vignette = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), vignetteMat);
+  vignette.frustumCulled = false;
+  vignette.renderOrder = 9999;
+  vignette.visible = false;
 
   // ── support detection → button state ──────────────────────────────────────
   function setButton(state, label, title) {
@@ -127,6 +146,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     dolly.position.set(0, 0, START_BACK);
     dolly.rotation.set(0, 0, 0);
     dolly.add(camera);
+    camera.add(vignette);
+    vignette.visible = true;
     scene.add(dolly);
 
     setButton("active", "Exit VR", "Leave VR");
@@ -137,6 +158,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       // Restore desktop camera + controls.
       const parent = camera.userData._parentBeforeVR || scene;
       parent.add(camera);
+      camera.remove(vignette);
+      vignette.visible = false;
       scene.remove(dolly);
       if (camera.userData._nearBeforeVR != null) {
         camera.near = camera.userData._nearBeforeVR;
@@ -284,9 +307,16 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       }
     }
 
+    let smoothMotion = 0;
+
     // Direct manipulation takes priority: while grabbing, skip stick locomotion
     // so the two don't fight.
-    if (updateGrab()) { reassessGate.noteMotion(now); return true; }
+    if (updateGrab()) {
+      reassessGate.noteMotion(now);
+      const cur = vignetteMat.uniforms.uOpacity.value;
+      vignetteMat.uniforms.uOpacity.value = cur + (0 - cur) * Math.min(1, dt * 8);
+      return true;
+    }
 
     const xrCam = renderer.xr.getCamera();
     const head = xrCam.getWorldPosition(new THREE.Vector3());
@@ -303,6 +333,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       dolly.position.addScaledVector(_fwd, -ly * step);
       dolly.position.addScaledVector(_right, lx * step);
       reassessGate.noteMotion(now);
+      smoothMotion = Math.max(smoothMotion, Math.hypot(lx, ly));
     }
 
     const [rx, ry] = axesFor("right");
@@ -328,7 +359,12 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       dolly.position.copy(head).addScaledVector(delta, -factor);
       dolly.scale.setScalar(newScale);
       reassessGate.noteMotion(now);
+      smoothMotion = Math.max(smoothMotion, Math.abs(ry));
     }
+    // Ease toward the target opacity so it fades rather than snaps.
+    const target = vignetteIntensity(smoothMotion);
+    const cur = vignetteMat.uniforms.uOpacity.value;
+    vignetteMat.uniforms.uOpacity.value = cur + (target - cur) * Math.min(1, dt * 8);
     return false;
   }
 

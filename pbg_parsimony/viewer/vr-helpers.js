@@ -44,6 +44,13 @@ export function makeAdaptiveBudget(initial, {
   };
 }
 
+// Maps current smooth-motion magnitude (0..maxAt) to a vignette opacity. Smooth
+// self-motion is the nausea trigger; grab motion (hand-locked) passes 0 here.
+export function vignetteIntensity(motionMagnitude, { maxAt = 1, maxIntensity = 0.6 } = {}) {
+  const t = Math.max(0, Math.min(1, motionMagnitude / maxAt));
+  return t * maxIntensity;
+}
+
 // Fires once after VR navigation has been idle for `idleMs`. Used to defer the
 // (expensive) LOD reassess until motion settles, so detail upgrades without the
 // per-frame walk that caused stutter.
