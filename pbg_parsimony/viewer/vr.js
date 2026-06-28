@@ -80,6 +80,41 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   vignette.renderOrder = 9999;
   vignette.visible = false;
 
+  // One-shot controls hint: a head-anchored label drawn from a canvas texture.
+  function makeHintTexture() {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 256;
+    const x = c.getContext("2d");
+    x.fillStyle = "rgba(10,12,18,0.82)";
+    roundRect(x, 0, 0, c.width, c.height, 28); x.fill();
+    x.fillStyle = "#eaf0ff";
+    x.font = "600 44px system-ui, sans-serif";
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText("Grab to move  ·  Two hands to zoom", c.width / 2, 92);
+    x.fillText("Right stick to turn  ·  Face button to exit", c.width / 2, 168);
+    const t = new THREE.CanvasTexture(c);
+    t.anisotropy = 4;
+    return t;
+  }
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  const hintMat = new THREE.MeshBasicMaterial({
+    map: makeHintTexture(), transparent: true, depthTest: false, depthWrite: false,
+  });
+  const hint = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.2), hintMat);
+  hint.position.set(0, -0.25, -1.0); // head-anchored, slightly below center, 1 m out
+  hint.renderOrder = 9998;
+  hint.frustumCulled = false;
+  hint.visible = false;
+  let hintHideAt = 0;
+
   // ── support detection → button state ──────────────────────────────────────
   function setButton(state, label, title) {
     if (!button) return;
@@ -148,6 +183,9 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     dolly.add(camera);
     camera.add(vignette);
     vignette.visible = true;
+    camera.add(hint);
+    hint.visible = true;
+    hintHideAt = performance.now() + 6000;
     scene.add(dolly);
 
     setButton("active", "Exit VR", "Leave VR");
@@ -160,6 +198,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       parent.add(camera);
       camera.remove(vignette);
       vignette.visible = false;
+      camera.remove(hint);
+      hint.visible = false;
       scene.remove(dolly);
       if (camera.userData._nearBeforeVR != null) {
         camera.near = camera.userData._nearBeforeVR;
@@ -293,6 +333,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   function updateVR(dt, now) {
     if (!renderer.xr.isPresenting || !session) return false;
 
+    if (hint.visible && now >= hintHideAt) hint.visible = false;
+
     // In-headset exit: the desktop "Exit VR" button is unreachable while
     // immersed. Map ANY face button (A/B/X/Y) or thumbstick-click on either
     // controller to ending the session, read straight off the live input sources
@@ -312,6 +354,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // Direct manipulation takes priority: while grabbing, skip stick locomotion
     // so the two don't fight.
     if (updateGrab()) {
+      hint.visible = false;
       reassessGate.noteMotion(now);
       const cur = vignetteMat.uniforms.uOpacity.value;
       vignetteMat.uniforms.uOpacity.value = cur + (0 - cur) * Math.min(1, dt * 8);
