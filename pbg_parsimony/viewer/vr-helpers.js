@@ -14,6 +14,36 @@ export function resolveGrab(gamepad, hand) {
   return false;
 }
 
+// Adapts the per-frame VR triangle budget in response to measured frame rate.
+// Shrinks the budget when fps falls below `shrinkAt` (Quest GPU under pressure),
+// restores it when there is headroom (`fps >= growAt`). Both directions are
+// rate-limited (shrinkBy / growBy multipliers per measurement) so the response
+// is smooth. Returns true from update() when the budget changed, so the caller
+// can fire scheduleReassess() to pick up the new geometry cap immediately.
+// Pure / dependency-free — safe to unit-test under `node --test`.
+export function makeAdaptiveBudget(initial, {
+  min = Math.round(initial * 0.25),
+  max = initial,
+  shrinkAt = 60,    // fps below this → reduce budget (Quest 2 target is 72 fps)
+  growAt = 68,      // fps at/above this → restore budget (margin below 72)
+  shrinkBy = 0.85,  // multiply budget by this on each low-fps measurement
+  growBy = 1.05,    // multiply budget by this on each high-fps measurement
+} = {}) {
+  let _value = initial;
+  return {
+    get value() { return _value; },
+    update(fps) {
+      const prev = _value;
+      if (fps < shrinkAt) {
+        _value = Math.max(min, Math.round(_value * shrinkBy));
+      } else if (fps >= growAt) {
+        _value = Math.min(max, Math.round(_value * growBy));
+      }
+      return _value !== prev;
+    },
+  };
+}
+
 // Fires once after VR navigation has been idle for `idleMs`. Used to defer the
 // (expensive) LOD reassess until motion settles, so detail upgrades without the
 // per-frame walk that caused stutter.

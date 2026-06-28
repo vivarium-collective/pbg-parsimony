@@ -17,6 +17,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { initVR } from "./vr.js?v=46";
+import { makeAdaptiveBudget } from "./vr-helpers.js";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -1575,6 +1576,9 @@ const VR_LOD_FLOOR = 0;
 // comfortable headroom on a Quest 2 so it cannot lock up. Bigger molecules claim
 // it first (see reassessLODs); the remainder render as cheap sphere proxies.
 const VR_TRIANGLE_BUDGET = 600000;
+// Adaptive controller: shrinks the triangle budget when fps dips (Quest GPU
+// pressure) and restores it when headroom returns. Seeded at VR_TRIANGLE_BUDGET.
+const vrBudget = makeAdaptiveBudget(VR_TRIANGLE_BUDGET);
 // Rare types (few copies) are always drawn in full — the global subsample is for
 // the abundant species. Without this, a 30-copy complex like the flagellum would
 // be culled to ~6 at a 20% show fraction.
@@ -1720,7 +1724,7 @@ function reassessLODs() {
   // even the Meta button → forced restart). Draw the biggest molecules as real
   // meshes first — they read as shapes; once the budget is spent the rest fall
   // back to cheap sphere proxies. No effect outside VR (budget = Infinity).
-  let vrTriBudget = isPresentingNow ? VR_TRIANGLE_BUDGET : Infinity;
+  let vrTriBudget = isPresentingNow ? vrBudget.value : Infinity;
   const order = isPresentingNow
     ? [...instancedMeshes].sort((a, b) => (b.enclosingRadius || 0) - (a.enclosingRadius || 0))
     : instancedMeshes;
@@ -3192,6 +3196,9 @@ function tick() {
   if (now - fpsUpdate > 400) {
     const fps = fpsCount / fpsAccum;
     fpsStat.innerHTML = `<span class="num" style="color:var(--text)">${fps.toFixed(0)}</span> fps`;
+    // VR only: update the adaptive budget; if it changed, re-run the LOD pass
+    // so the new triangle cap takes effect on the next reassessLODs walk.
+    if (renderer.xr.isPresenting && vrBudget.update(fps)) scheduleReassess();
     fpsAccum = 0;
     fpsCount = 0;
     fpsUpdate = now;

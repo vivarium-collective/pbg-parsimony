@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveGrab } from "./vr-helpers.js";
+import { makeAdaptiveBudget } from "./vr-helpers.js";
 
 test("resolveGrab: trigger pressed grabs", () => {
   assert.equal(resolveGrab({ buttons: [{ pressed: true }, { pressed: false }] }, null), true);
@@ -44,4 +45,29 @@ test("makeMotionGate: new motion re-arms the gate", () => {
 test("makeMotionGate: does not fire before any motion", () => {
   const g = makeMotionGate(180);
   assert.equal(g.shouldFire(10000), false);
+});
+
+test("makeAdaptiveBudget: shrinks on low fps and signals change", () => {
+  const b = makeAdaptiveBudget(1000);
+  const changed = b.update(30); // well below shrinkAt threshold
+  assert.equal(changed, true);
+  assert.ok(b.value < 1000, `expected value < 1000, got ${b.value}`);
+});
+
+test("makeAdaptiveBudget: grows toward max on high fps", () => {
+  const b = makeAdaptiveBudget(1000);
+  b.update(30); // shrink first
+  const shrunk = b.value;
+  const changed = b.update(80); // well above growAt threshold
+  assert.equal(changed, true);
+  assert.ok(b.value > shrunk, `expected value > ${shrunk}, got ${b.value}`);
+});
+
+test("makeAdaptiveBudget: clamps at min and returns false when stable", () => {
+  const b = makeAdaptiveBudget(1000, { min: 500 });
+  // Drive to floor
+  for (let i = 0; i < 100; i++) b.update(10);
+  assert.equal(b.value, 500);
+  const changed = b.update(10);
+  assert.equal(changed, false);
 });
