@@ -24,10 +24,10 @@ export function resolveGrab(gamepad, hand) {
 export function makeAdaptiveBudget(initial, {
   min = Math.round(initial * 0.25),
   max = initial,
-  shrinkAt = 60,    // fps below this → reduce budget (Quest 2 target is 72 fps)
-  growAt = 68,      // fps at/above this → restore budget (margin below 72)
-  shrinkBy = 0.85,  // multiply budget by this on each low-fps measurement
-  growBy = 1.05,    // multiply budget by this on each high-fps measurement
+  shrinkAt = 66,    // fps below this → reduce budget; protects against GPU lock on a 72 Hz Quest (raised from 60)
+  growAt = 68,      // grow when fps >= 68: a 72 Hz Quest caps fps at ~72, so a >72 threshold would never recover the budget; 68 allows recovery with headroom
+  shrinkBy = 0.80,  // multiply budget by this on each low-fps measurement (0.80 for faster relief of GPU pressure)
+  growBy = 1.05,    // multiply budget by this on each high-fps measurement; gentle growth avoids oscillation in the narrow [66,68) dead-zone
 } = {}) {
   let _value = initial;
   return {

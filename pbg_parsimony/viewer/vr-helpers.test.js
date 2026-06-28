@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveGrab } from "./vr-helpers.js";
-import { makeAdaptiveBudget } from "./vr-helpers.js";
+import { resolveGrab, makeMotionGate, makeAdaptiveBudget } from "./vr-helpers.js";
 
 test("resolveGrab: trigger pressed grabs", () => {
   assert.equal(resolveGrab({ buttons: [{ pressed: true }, { pressed: false }] }, null), true);
@@ -22,8 +21,6 @@ test("resolveGrab: nothing pressed does not grab", () => {
 test("resolveGrab: null inputs do not grab or throw", () => {
   assert.equal(resolveGrab(null, null), false);
 });
-
-import { makeMotionGate } from "./vr-helpers.js";
 
 test("makeMotionGate: fires once after idle window elapses", () => {
   const g = makeMotionGate(180);
@@ -47,27 +44,47 @@ test("makeMotionGate: does not fire before any motion", () => {
   assert.equal(g.shouldFire(10000), false);
 });
 
-test("makeAdaptiveBudget: shrinks on low fps and signals change", () => {
+test("makeAdaptiveBudget: exact shrink step (1000*0.80=800, then 800*0.80=640)", () => {
   const b = makeAdaptiveBudget(1000);
-  const changed = b.update(30); // well below shrinkAt threshold
-  assert.equal(changed, true);
-  assert.ok(b.value < 1000, `expected value < 1000, got ${b.value}`);
+  assert.equal(b.update(30), true);
+  assert.equal(b.value, 800);
+  assert.equal(b.update(30), true);
+  assert.equal(b.value, 640);
 });
 
-test("makeAdaptiveBudget: grows toward max on high fps", () => {
+test("makeAdaptiveBudget: dead-zone [66,68) yields no change", () => {
   const b = makeAdaptiveBudget(1000);
-  b.update(30); // shrink first
-  const shrunk = b.value;
-  const changed = b.update(80); // well above growAt threshold
-  assert.equal(changed, true);
-  assert.ok(b.value > shrunk, `expected value > ${shrunk}, got ${b.value}`);
+  // 67 is in [66,68) → neither shrink nor grow
+  assert.equal(b.update(67), false);
+  assert.equal(b.value, 1000);
+  // 66 is not < 66 → no shrink
+  assert.equal(b.update(66), false);
+  assert.equal(b.value, 1000);
 });
 
-test("makeAdaptiveBudget: clamps at min and returns false when stable", () => {
+test("makeAdaptiveBudget: shrink threshold boundary — 65 shrinks, 66 does not", () => {
+  assert.equal(makeAdaptiveBudget(1000).update(65), true);
+  assert.equal(makeAdaptiveBudget(1000).update(66), false);
+});
+
+test("makeAdaptiveBudget: exact grow step after one shrink (800*1.05=840)", () => {
+  const b = makeAdaptiveBudget(1000);
+  b.update(30); // shrink to 800
+  assert.equal(b.value, 800);
+  assert.equal(b.update(80), true);
+  assert.equal(b.value, 840); // round(800*1.05)=840
+});
+
+test("makeAdaptiveBudget: clamps at custom min and returns false when at floor", () => {
   const b = makeAdaptiveBudget(1000, { min: 500 });
-  // Drive to floor
   for (let i = 0; i < 100; i++) b.update(10);
   assert.equal(b.value, 500);
-  const changed = b.update(10);
-  assert.equal(changed, false);
+  assert.equal(b.update(10), false);
+});
+
+test("makeAdaptiveBudget: clamps at max — no growth past initial when already at ceiling", () => {
+  const b = makeAdaptiveBudget(1000);
+  // value starts at 1000 = max; high fps cannot grow past max
+  assert.equal(b.update(80), false);
+  assert.equal(b.value, 1000);
 });
