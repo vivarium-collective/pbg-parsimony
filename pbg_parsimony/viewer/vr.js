@@ -276,7 +276,10 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // black. Use metre-scale near/far in VR; restore on exit.
     camera.userData._nearBeforeVR = camera.near;
     camera.userData._farBeforeVR = camera.far;
-    camera.near = 0.02;
+    // Near plane at 15 cm (not 2 cm): anything closer renders with extreme
+    // binocular disparity the eyes can't fuse → double vision. Clipping that zone
+    // keeps stereo comfortable when molecules pass close while zoomed in.
+    camera.near = 0.15;
     camera.far = 2000;
     camera.updateProjectionMatrix();
     dolly.scale.setScalar(WORLD_SCALE);
@@ -368,7 +371,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   const _grab = { left: false, right: false };
   const _haW = new THREE.Vector3();   // world-space hand positions (two-hand rotate)
   const _hbW = new THREE.Vector3();
-  let _gPrevAngle = 0;                 // previous inter-hand yaw angle (two-hand rotate)
+  const _prevVec = new THREE.Vector3(); // previous inter-hand direction (two-hand rotate)
+  const _curVec = new THREE.Vector3();
 
   function isGrabbing(ctrl) {
     const src = ctrl.userData.inputSource;
@@ -405,7 +409,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
         _gPrevMid.copy(_gMid);
         _gPrevDist = dist;
         a.getWorldPosition(_haW); b.getWorldPosition(_hbW);
-        _gPrevAngle = Math.atan2(_hbW.x - _haW.x, _hbW.z - _haW.z);
+        _prevVec.subVectors(_hbW, _haW).normalize();
         pulse(a, 0.4, 25); pulse(b, 0.4, 25);
       } else {
         // translate by midpoint movement…
@@ -428,13 +432,13 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
         // far, so a hand-midpoint pivot made the distant cell revolve around the
         // user instead of spinning in place. World-space angle → no dolly feedback.
         a.getWorldPosition(_haW); b.getWorldPosition(_hbW);
-        const ang = Math.atan2(_hbW.x - _haW.x, _hbW.z - _haW.z);
-        let dAng = ang - _gPrevAngle;
-        if (dAng > Math.PI) dAng -= 2 * Math.PI; else if (dAng < -Math.PI) dAng += 2 * Math.PI;
-        _q.setFromAxisAngle(_up, -dAng);      // camera counter-rotates → cell follows hands
+        _curVec.subVectors(_hbW, _haW).normalize();
+        // Full-arc (any-axis) rotation from the previous to the current inter-hand
+        // direction — lets you tumble the cell in any direction, not just yaw.
+        _q.setFromUnitVectors(_prevVec, _curVec).invert(); // camera counter-rotates → cell follows hands
         dolly.position.applyQuaternion(_q);   // pivot = world origin (cell centre)
         dolly.quaternion.premultiply(_q);
-        _gPrevAngle = ang;
+        _prevVec.copy(_curVec);
         _gPrevMid.copy(_gMid);
         _gPrevDist = dist;
       }
