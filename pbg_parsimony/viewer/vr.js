@@ -183,6 +183,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     dolly.add(camera);
     camera.add(vignette);
     vignette.visible = true;
+    vignetteMat.uniforms.uOpacity.value = 0; // reset so a session ended mid-fly doesn't flash a stale vignette on re-enter
     camera.add(hint);
     hint.visible = true;
     hintHideAt = performance.now() + 6000;
