@@ -3153,7 +3153,12 @@ function tick() {
     // we do NOT reassess every frame — that re-walked the whole drawn set each
     // frame and stuttered. reassess runs once on enter + as each mesh finishes
     // loading (loadLevel → scheduleReassess), which is enough.
-    if (vrApi) vrApi.updateVR(dt);
+    if (vrApi) {
+      vrApi.updateVR(dt, now);
+      // Detail upgrade: once VR navigation settles, re-run the LOD pass so
+      // molecules near the user load finer meshes (no per-frame walk → no hitch).
+      if (vrApi.maybeReassess(now)) scheduleReassess();
+    }
   } else {
     if (autoSpin) {
       controls.target;

@@ -13,3 +13,18 @@ export function resolveGrab(gamepad, hand) {
   if (hand && hand.pinching) return true;
   return false;
 }
+
+// Fires once after VR navigation has been idle for `idleMs`. Used to defer the
+// (expensive) LOD reassess until motion settles, so detail upgrades without the
+// per-frame walk that caused stutter.
+export function makeMotionGate(idleMs) {
+  let lastMotion = -Infinity;
+  let armed = false; // becomes true on motion, false after firing
+  return {
+    noteMotion(now) { lastMotion = now; armed = true; },
+    shouldFire(now) {
+      if (armed && now - lastMotion >= idleMs) { armed = false; return true; }
+      return false;
+    },
+  };
+}

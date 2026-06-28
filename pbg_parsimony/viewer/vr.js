@@ -23,7 +23,7 @@
 // XR session and restored on exit.
 
 import * as THREE from "three";
-import { resolveGrab } from "./vr-helpers.js";
+import { resolveGrab, makeMotionGate } from "./vr-helpers.js";
 
 // --- VR scene framing (Ångström units) ---------------------------------------
 // WORLD_SCALE: Å per "head metre". 1500 makes the ~20,000 Å cell read like a
@@ -174,6 +174,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   const _up = new THREE.Vector3(0, 1, 0);
   const _q = new THREE.Quaternion();
   let _snapArmed = false;
+  const reassessGate = makeMotionGate(180);
 
   // ── grab-to-move / pinch-to-scale ─────────────────────────────────────────
   // Hold grip (or trigger) and move your hand to drag the whole world: pull a
@@ -266,7 +267,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     return false;
   }
 
-  function updateVR(dt) {
+  function updateVR(dt, now) {
     if (!renderer.xr.isPresenting || !session) return false;
 
     // In-headset exit: the desktop "Exit VR" button is unreachable while
@@ -285,7 +286,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
 
     // Direct manipulation takes priority: while grabbing, skip stick locomotion
     // so the two don't fight.
-    if (updateGrab()) return true;
+    if (updateGrab()) { reassessGate.noteMotion(now); return true; }
 
     const xrCam = renderer.xr.getCamera();
     const head = xrCam.getWorldPosition(new THREE.Vector3());
@@ -301,6 +302,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       const step = FLY_SPEED * dt * dolly.scale.x;
       dolly.position.addScaledVector(_fwd, -ly * step);
       dolly.position.addScaledVector(_right, lx * step);
+      reassessGate.noteMotion(now);
     }
 
     const [rx, ry] = axesFor("right");
@@ -311,6 +313,7 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
         _q.setFromAxisAngle(_up, rx > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
         dolly.position.sub(head).applyQuaternion(_q).add(head);
         dolly.quaternion.premultiply(_q);
+        reassessGate.noteMotion(now);
       }
     } else if (Math.abs(rx) < 0.3) {
       _snapArmed = false;
@@ -324,9 +327,14 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
       const delta = head.clone().sub(dolly.position);
       dolly.position.copy(head).addScaledVector(delta, -factor);
       dolly.scale.setScalar(newScale);
+      reassessGate.noteMotion(now);
     }
     return false;
   }
 
-  return { updateVR, get presenting() { return renderer.xr.isPresenting; } };
+  return {
+    updateVR,
+    maybeReassess(now) { return reassessGate.shouldFire(now); },
+    get presenting() { return renderer.xr.isPresenting; },
+  };
 }
