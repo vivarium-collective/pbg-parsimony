@@ -23,6 +23,7 @@
 // XR session and restored on exit.
 
 import * as THREE from "three";
+import { resolveGrab } from "./vr-helpers.js";
 
 // --- VR scene framing (Ångström units) ---------------------------------------
 // WORLD_SCALE: Å per "head metre". 1500 makes the ~20,000 Å cell read like a
@@ -55,6 +56,8 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // trigger = "grab") and handedness each frame.
     c.addEventListener("connected", (e) => { c.userData.inputSource = e.data; });
     c.addEventListener("disconnected", () => { c.userData.inputSource = null; });
+    c.addEventListener("selectstart", () => { c.userData.pinching = true; });
+    c.addEventListener("selectend", () => { c.userData.pinching = false; });
     dolly.add(c);
   }
 
@@ -187,11 +190,13 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
   let _gPrevDist = 0;                     // last inter-hand distance (2-hand)
 
   function isGrabbing(ctrl) {
-    const gp = ctrl.userData.inputSource && ctrl.userData.inputSource.gamepad;
-    if (!gp || !gp.buttons) return false;
-    const grip = gp.buttons[1] && gp.buttons[1].pressed;   // squeeze / grip
-    const trig = gp.buttons[0] && gp.buttons[0].pressed;   // index trigger
-    return !!(grip || trig);
+    const src = ctrl.userData.inputSource;
+    const gp = src && src.gamepad;
+    // Hand-tracking pinch: WebXR exposes a `hand` map; treat a tracked hand with
+    // a near-zero thumb–index gap as a pinch. selectstart also fires for pinch,
+    // but reading it here keeps grab stateless per frame.
+    const hand = src && src.hand ? { pinching: !!ctrl.userData.pinching } : null;
+    return resolveGrab(gp, hand);
   }
   function pulse(ctrl, intensity, ms) {
     const gp = ctrl.userData.inputSource && ctrl.userData.inputSource.gamepad;
