@@ -37,6 +37,12 @@ const sliceAxis = document.getElementById("slice-axis");
 const slicePos = document.getElementById("slice-pos");
 const slicePosValue = document.getElementById("slice-pos-value");
 const sliceFlip = document.getElementById("slice-flip");
+// Preset → (azimuth°, elevation°) for the section-plane normal.
+const SLICE_PRESETS = {
+  "horizontal": [0, 90],    // normal +Y → a horizontal cut
+  "vertical-x": [90, 0],    // normal +X → cross-section across the rod
+  "vertical-z": [0, 0],     // normal +Z → lengthwise cut
+};
 
 // ───── three.js scene ───────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -371,11 +377,14 @@ function clearPacking() {
 const CEL_VERTEX_SHADER = `
 varying vec3 vNormalW;
 varying vec3 vWorldPos;
+#include <clipping_planes_pars_vertex>
 void main() {
   vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
   vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
   vWorldPos = worldPos.xyz;
-  gl_Position = projectionMatrix * viewMatrix * worldPos;
+  vec4 mvPosition = viewMatrix * worldPos;   // view-space pos, needed by the clip chunk
+  #include <clipping_planes_vertex>
+  gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
@@ -384,7 +393,9 @@ varying vec3 vNormalW;
 varying vec3 vWorldPos;
 uniform vec3 uColor;
 uniform vec3 uLightDir;
+#include <clipping_planes_pars_fragment>
 void main() {
+  #include <clipping_planes_fragment>
   vec3 N = normalize(vNormalW);
   vec3 V = normalize(cameraPosition - vWorldPos);
   float NdotL = dot(N, normalize(uLightDir));
@@ -417,6 +428,7 @@ function makeCelMaterial(color) {
     depthTest: true,
     depthWrite: true,
     transparent: false,
+    clipping: true,   // honor renderer/material clippingPlanes (section tool)
   });
 }
 
@@ -1113,7 +1125,7 @@ function buildLipidMembrane(placements) {
   // (head + tail strands) which looked like scattered bugs up close. The tails
   // are dropped; one fat bead per lipid, big enough that neighbours merge.
   const beadT = [0.0];
-  const beadR = [13];
+  const beadR = [24];   // fat heads so neighbours merge into a continuous band
   const beadH = [1];
   const per = 1;
   // The membrane is always drawn (not under the molecule draw budget); subsample
@@ -1227,13 +1239,13 @@ async function buildScene(doc, fileName) {
   // placements whose desired LOD hasn't loaded yet); `reassessLODs`
   // partitions placements across the fallback and any loaded LOD
   // meshes on every camera change.
+  // Every ingredient — including the lipid bilayer leaflets — renders through the
+  // standard instanced path, so the membranes get legend entries, per-ingredient
+  // and per-category visibility checkboxes, click-to-select, and the crowding
+  // (show %) subsample, exactly like every other species.
   for (const [tid, pts] of byType.entries()) {
     const ing = ingredientById.get(tid);
     if (!ing) continue;
-    // The membrane is intentionally not rendered — explicit per-lipid glyphs
-    // never read as a convincing bilayer at whole-cell zoom, so we drop the
-    // lipid ingredient entirely and show only the molecular interior.
-    if (ing.name === "lipid") continue;
     const colorArr = ing.color || [0.5, 0.5, 0.5];
     const color = new THREE.Color(colorArr[0], colorArr[1], colorArr[2]);
     const enc = ing.shape.enclosing_radius || ing.shape.radius || 1.0;
@@ -2568,37 +2580,48 @@ function applyOutlineWidth(pixels) {
 }
 
 function applyClippingPlane() {
-  const axis = sliceAxis.value;
-  if (!axis) {
+  const mode = sliceAxis.value;
+  if (!mode) {
     renderer.clippingPlanes = [];
     clippingPlane = null;
+    setMaterialClipping([]);
     return;
   }
-  const normal = new THREE.Vector3(
-    axis === "x" ? 1 : 0,
-    axis === "y" ? 1 : 0,
-    axis === "z" ? 1 : 0,
-  );
+  // Plane orientation from the preset's azimuth (around vertical Y) + elevation
+  // (tilt): el=90 → normal +Y (horizontal cut); el=0,az=90 → +X (across the
+  // rod); el=0,az=0 → +Z (along the rod).
+  const [azDeg, elDeg] = SLICE_PRESETS[mode] || [0, 90];
+  const az = THREE.MathUtils.degToRad(azDeg), el = THREE.MathUtils.degToRad(elDeg);
+  const ce = Math.cos(el);
+  const normal = new THREE.Vector3(ce * Math.sin(az), Math.sin(el), ce * Math.cos(az)).normalize();
   if (sliceFlip.checked) normal.negate();
-  const t = parseFloat(slicePos.value);
   if (!dataBounds) return;
+  // Position the plane along its own normal: project the 8 bbox corners onto the
+  // normal to get the world range the slider spans (works for any orientation).
   const bbMin = dataBounds.min, bbMax = dataBounds.max;
-  const lo = axis === "x" ? bbMin[0] : axis === "y" ? bbMin[1] : bbMin[2];
-  const hi = axis === "x" ? bbMax[0] : axis === "y" ? bbMax[1] : bbMax[2];
-  const worldPos = lo + (hi - lo) * (t * 0.5 + 0.5);
-  slicePosValue.textContent = worldPos.toFixed(1);
-  // Plane equation: normal · p + constant = 0; we keep points where
-  // dot(normal, p) ≤ -constant. So constant = -dot(normal, planePoint).
-  const planePoint = new THREE.Vector3(
-    axis === "x" ? worldPos : 0,
-    axis === "y" ? worldPos : 0,
-    axis === "z" ? worldPos : 0,
-  );
-  const constant = -normal.dot(planePoint);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    const c = new THREE.Vector3(
+      (i & 1) ? bbMax[0] : bbMin[0],
+      (i & 2) ? bbMax[1] : bbMin[1],
+      (i & 4) ? bbMax[2] : bbMin[2]);
+    const d = normal.dot(c);
+    if (d < lo) lo = d; if (d > hi) hi = d;
+  }
+  const t = parseFloat(slicePos.value);
+  const d = lo + (hi - lo) * (t * 0.5 + 0.5);   // signed distance along the normal
+  slicePosValue.textContent = d.toFixed(0);
+  // Keep points where normal·p ≤ d  ⇒  THREE.Plane(normal, -d).
+  const constant = -d;
   clippingPlane = new THREE.Plane(normal, constant);
   renderer.clippingPlanes = [clippingPlane];
-  // Re-apply per-material clipping for every variant (fallback +
-  // each loaded LOD pair).
+  setMaterialClipping([clippingPlane]);
+}
+
+// Apply a clipping-plane list to every ingredient material variant (fallback +
+// each loaded LOD pair). `[]` removes the section (materials override the
+// renderer-level planes, so they must be cleared explicitly when turning off).
+function setMaterialClipping(planes) {
   for (const e of instancedMeshes) {
     const variants = [e.fallbackSphere.standardMesh, e.fallbackSphere.celMesh];
     if (e.lods) {
@@ -2607,7 +2630,7 @@ function applyClippingPlane() {
       }
     }
     for (const m of variants) {
-      m.material.clippingPlanes = [clippingPlane];
+      m.material.clippingPlanes = planes;
       m.material.needsUpdate = true;
     }
   }

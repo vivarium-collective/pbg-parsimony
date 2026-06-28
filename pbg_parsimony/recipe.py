@@ -4,10 +4,14 @@ from __future__ import annotations
 LOD_VOXELS = [16.0, 8.0, 4.0, 2.5]
 
 
-def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None):
+def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None,
+                 packing_mode=None, surface_offset=None):
     """A mesh ingredient object for the recipe ``objects`` map. ``principal_vector``
     (a local axis) is aligned to the surface normal by the engine during surface
-    placement — e.g. a flagellum's whip axis pointing outward from the envelope."""
+    placement — e.g. a flagellum's whip axis pointing outward from the envelope.
+    ``packing_mode`` (``"tiled"`` → even Fibonacci surface layer, e.g. a lipid
+    leaflet) and ``surface_offset`` (Å along the outward normal, e.g. a bilayer
+    leaflet at ±δ or a membrane protein's depth) feed surface placement."""
     o = {
         "type": "mesh",
         "color": [float(c) for c in color],
@@ -18,18 +22,55 @@ def object_block(color, lod_paths, proxy_voxel_size=None, principal_vector=None)
         o["proxy_voxel_size"] = float(proxy_voxel_size)
     if principal_vector is not None:
         o["principal_vector"] = [float(v) for v in principal_vector]
+    if packing_mode and packing_mode != "random":
+        o["packing_mode"] = packing_mode
+    if surface_offset:
+        o["surface_offset"] = float(surface_offset)
     return o
 
 
+def _capsule(half, r):
+    return {"kind": "capsule", "a": [-half, 0, 0], "b": [half, 0, 0], "radius": float(r)}
+
+
 def author_recipe(name, objects, interior, surface, capsule, chromosome=None,
-                  bbox_pad=1.2, cell_compartment=None):
+                  bbox_pad=1.2, cell_compartment=None, envelope=None):
     """Assemble a ``2.1-parsimony`` recipe dict. ``capsule`` is
     ``{"half_len","radius"}`` (Å); ``chromosome`` is a recipe chromosome block.
     ``cell_compartment`` overrides the default capsule compartment (e.g. a
-    ``{"kind":"mesh","mesh_path":...}`` constricted-cell mesh for a septum)."""
+    ``{"kind":"mesh","mesh_path":...}`` constricted-cell mesh for a septum).
+
+    ``envelope`` builds a gram-negative two-membrane envelope: a dict
+    ``{"outer": {half_len,radius,interior,surface}, "inner": {…}}``. The outer
+    ``cell`` compartment's interior holds the inner ``cytoplasm`` compartment
+    (its volume is excluded → the gap is the periplasm) plus periplasm
+    directives; cytoplasm holds the cytoplasm directives + chromosome."""
     half, r = float(capsule["half_len"]), float(capsule["radius"])
-    comp = cell_compartment or {
-        "kind": "capsule", "a": [-half, 0, 0], "b": [half, 0, 0], "radius": r}
+    if envelope is not None:
+        o, i = envelope["outer"], envelope["inner"]
+        oh, orad = float(o["half_len"]), float(o["radius"])
+        recipe = {
+            "name": name, "version": "0.1.0", "format_version": "2.1-parsimony",
+            "description": "Gram-negative envelope packed by pbg-parsimony.",
+            "bounding_box": [[-(oh + orad), -orad * bbox_pad, -orad * bbox_pad],
+                             [oh + orad, orad * bbox_pad, orad * bbox_pad]],
+            "objects": objects,
+            "composition": {
+                "space": {"regions": {"interior": ["cell"]}},
+                "cell": {  # outer membrane (surface) + periplasm (interior, minus the inner child)
+                    "compartment": _capsule(oh, orad),
+                    "regions": {"interior": ["cytoplasm"] + o["interior"], "surface": o["surface"]},
+                },
+                "cytoplasm": {  # inner membrane (surface) + cytoplasm (interior)
+                    "compartment": _capsule(float(i["half_len"]), float(i["radius"])),
+                    "regions": {"interior": i["interior"], "surface": i["surface"]},
+                },
+            },
+        }
+        if chromosome:
+            recipe["chromosome"] = chromosome
+        return recipe
+    comp = cell_compartment or _capsule(half, r)
     recipe = {
         "name": name, "version": "0.1.0", "format_version": "2.1-parsimony",
         "description": "Packed by pbg-parsimony.",

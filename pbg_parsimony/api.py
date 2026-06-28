@@ -31,10 +31,17 @@ class Ingredient:
     sphere_radius: float | None = None
     color: tuple = (0.6, 0.6, 0.6)
     region: str = "interior"
+    # Which envelope compartment this ingredient belongs to. Default cytoplasm
+    # (the inner compartment). For a gram-negative envelope (build_pack envelope=…):
+    # "cytoplasm" (inner interior) | "periplasm" (between the membranes) |
+    # "inner_membrane" | "outer_membrane" (region="surface" → in that bilayer).
+    compartment: str = "cytoplasm"
     display_name: str = ""
     category: str = ""
     proxy_voxel_size: float | None = None
     principal_vector: tuple | None = None
+    packing_mode: str = "random"  # "tiled" → even Fibonacci surface layer (lipid leaflet)
+    surface_offset: float = 0.0   # Å along the outward normal (bilayer leaflet ±δ / TM depth)
     lod_count: int = 4
     mesh_lods: str | None = None  # override the voxel-size LOD list passed to the
     #                               mesher (e.g. "16,8" for a big sparse object like
@@ -120,8 +127,15 @@ def _public_structure(ref):
 
 def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = None, *,
                out_dir, name: str = "model", scale: float = 1.0, proxy_lod: int = 2,
-               cell_mesh=None) -> dict:
+               cell_mesh=None, envelope: dict | None = None) -> dict:
     """Resolve + mesh structures, author the recipe, and pack the cell.
+
+    ``envelope`` enables a gram-negative two-membrane envelope: a dict
+    ``{"inner": Capsule, "outer": Capsule}``. Ingredients are then routed by
+    ``Ingredient.compartment`` into nested compartments — outer ``cell`` (its
+    surface = outer membrane, interior = periplasm) wrapping inner ``cytoplasm``
+    (its surface = inner membrane, interior = cytoplasm). The chromosome lives in
+    the cytoplasm. ``None`` → the original single-capsule cell.
 
     Returns ``{pack_path, sidecar_path, recipe_path, pipeline_path, n_placed,
     ingredients}``. Meshes go in ``<out_dir>/meshes``; structures cache in
@@ -133,16 +147,29 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     objects, interior, surface, fiber, sidecar = {}, [], [], [], {}
     big_ids = []  # interior ingredients to pack first (pack_first=True)
     surface_ids = []
+    # Envelope mode: route directives into the nested cell(outer)/cytoplasm(inner)
+    # compartments. cell.surface = outer membrane, cell.interior = periplasm,
+    # cytoplasm.surface = inner membrane, cytoplasm.interior = cytoplasm.
+    env = {"cell": {"interior": [], "surface": []},
+           "cytoplasm": {"interior": [], "surface": []}}
+
+    def _route(ing):
+        c = ing.compartment
+        if c == "periplasm":      return "cell", "interior"
+        if c == "outer_membrane": return "cell", "surface"
+        if c == "inner_membrane": return "cytoplasm", "surface"
+        return "cytoplasm", "interior"
 
     def add_mesh(obj_id, ref, color, proxy=None, lod_count=4, principal_vector=None,
-                 mesh_lods=None):
+                 mesh_lods=None, packing_mode=None, surface_offset=None):
         path = fetch(ref, struct_cache, slug=obj_id)
         stem = mesh_file(path, mesh_dir, lods=mesh_lods) if mesh_lods else mesh_file(path, mesh_dir)
         lods = [f"meshes/{stem}.lod{i}.obj" for i in range(lod_count)
                 if (mesh_dir / f"{stem}.lod{i}.obj").exists()]
         if not lods:
             return False
-        objects[obj_id] = object_block(color, lods, proxy, principal_vector)
+        objects[obj_id] = object_block(color, lods, proxy, principal_vector,
+                                       packing_mode, surface_offset)
         return True
 
     for ing in ingredients:
@@ -151,11 +178,16 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
                    "color": [float(c) for c in ing.color]}
             if ing.principal_vector is not None:
                 obj["principal_vector"] = list(ing.principal_vector)
+            if ing.packing_mode and ing.packing_mode != "random":
+                obj["packing_mode"] = ing.packing_mode
+            if ing.surface_offset:
+                obj["surface_offset"] = float(ing.surface_offset)
             objects[ing.id] = obj
         else:
             try:
                 if not add_mesh(ing.id, ing.structure, ing.color, ing.proxy_voxel_size, ing.lod_count,
-                                ing.principal_vector, ing.mesh_lods):
+                                ing.principal_vector, ing.mesh_lods,
+                                ing.packing_mode, ing.surface_offset):
                     print(f"  skip {ing.id}: no LODs"); continue
             except Exception as e:  # noqa: BLE001 — one bad structure shouldn't kill the build
                 print(f"  skip {ing.id}: structure error {str(e)[:60]}"); continue
@@ -175,10 +207,17 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
             # placed randomly via a count directive.
             continue
         directive = {"object": ing.id, "count": cnt}
+        if ing.region == "fiber":
+            fiber.append(directive); continue
         if ing.region == "surface":
-            surface.append(directive); surface_ids.append(ing.id)
-        elif ing.region == "fiber":
-            fiber.append(directive)
+            surface_ids.append(ing.id)
+        if envelope is not None:
+            rc, region = _route(ing)
+            env[rc][region].append(directive)
+            if region == "interior" and ing.pack_first:
+                big_ids.append(ing.id)
+        elif ing.region == "surface":
+            surface.append(directive)
         else:
             interior.append(directive)
             if ing.pack_first:
@@ -243,9 +282,19 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
         (out_dir / "cell.obj").write_text("\n".join(obj_lines) + "\n")
         cell_compartment = {"kind": "mesh", "mesh_path": "cell.obj"}
 
+    env_arg = None
+    if envelope is not None:
+        if chrom_block is not None:
+            chrom_block["compartment"] = "cytoplasm"  # nucleoid lives inside the inner membrane
+        env_arg = {
+            "outer": {"half_len": envelope["outer"].half_len, "radius": envelope["outer"].radius,
+                      "interior": env["cell"]["interior"], "surface": env["cell"]["surface"]},
+            "inner": {"half_len": envelope["inner"].half_len, "radius": envelope["inner"].radius,
+                      "interior": env["cytoplasm"]["interior"], "surface": env["cytoplasm"]["surface"]},
+        }
     recipe = author_recipe(name, objects, interior, surface,
                            {"half_len": capsule.half_len, "radius": capsule.radius},
-                           chrom_block, cell_compartment=cell_compartment)
+                           chrom_block, cell_compartment=cell_compartment, envelope=env_arg)
     recipe_path = out_dir / f"{name}.json"
     recipe_path.write_text(json.dumps(recipe, indent=2))
     pipeline = build_pipeline(name, f"{name}.json", surface_ids=surface_ids,
