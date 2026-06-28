@@ -286,12 +286,24 @@ def build_pack(ingredients, capsule: Capsule, chromosome: Chromosome | None = No
     if envelope is not None:
         if chrom_block is not None:
             chrom_block["compartment"] = "cytoplasm"  # nucleoid lives inside the inner membrane
-        env_arg = {
-            "outer": {"half_len": envelope["outer"].half_len, "radius": envelope["outer"].radius,
-                      "interior": env["cell"]["interior"], "surface": env["cell"]["surface"]},
-            "inner": {"half_len": envelope["inner"].half_len, "radius": envelope["inner"].radius,
-                      "interior": env["cytoplasm"]["interior"], "surface": env["cytoplasm"]["surface"]},
-        }
+
+        def _mesh_path(mesh, fname):  # write a (verts, faces) mesh as OBJ, return its rel path
+            verts, faces = mesh
+            lines = [f"v {x:.2f} {y:.2f} {z:.2f}" for (x, y, z) in verts]
+            lines += [f"f {a + 1} {b + 1} {c + 1}" for (a, b, c) in faces]
+            (out_dir / fname).write_text("\n".join(lines) + "\n")
+            return fname
+
+        outer_spec = {"half_len": envelope["outer"].half_len, "radius": envelope["outer"].radius,
+                      "interior": env["cell"]["interior"], "surface": env["cell"]["surface"]}
+        inner_spec = {"half_len": envelope["inner"].half_len, "radius": envelope["inner"].radius,
+                      "interior": env["cytoplasm"]["interior"], "surface": env["cytoplasm"]["surface"]}
+        # Dividing cell: constricted membrane meshes (pinched at the septum).
+        if envelope.get("outer_mesh"):
+            outer_spec["mesh_path"] = _mesh_path(envelope["outer_mesh"], "om.obj")
+        if envelope.get("inner_mesh"):
+            inner_spec["mesh_path"] = _mesh_path(envelope["inner_mesh"], "im.obj")
+        env_arg = {"outer": outer_spec, "inner": inner_spec}
     recipe = author_recipe(name, objects, interior, surface,
                            {"half_len": capsule.half_len, "radius": capsule.radius},
                            chrom_block, cell_compartment=cell_compartment, envelope=env_arg)
