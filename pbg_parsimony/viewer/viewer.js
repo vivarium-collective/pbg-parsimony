@@ -16,7 +16,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { initVR } from "./vr.js?v=46";
+import { initVR } from "./vr.js?v=47";
 import { makeAdaptiveBudget } from "./vr-helpers.js";
 
 // ───── DOM refs ─────────────────────────────────────────────────────
