@@ -1607,6 +1607,13 @@ const vrBudget = makeAdaptiveBudget(450000, {
 // before the pose updates, would blank the scene — the old "black void").
 const VR_CULL_MARGIN = 4000;
 let vrFrameCount = 0;
+// Depth-reveal (Mol*-style): in VR, render only a shell of this depth (Å) ahead
+// of the nearest visible molecule. The occluded interior isn't drawn when you're
+// outside the cell, and deeper layers are revealed as you move in. revealMinDist
+// holds the nearest in-frustum molecule from the previous pass (cheap — the
+// camera is stable between debounced reassess passes).
+const REVEAL_BAND = 5000;
+let revealMinDist = null;
 // Rare types (few copies) are always drawn in full — the global subsample is for
 // the abundant species. Without this, a 30-copy complex like the flagellum would
 // be culled to ~6 at a 20% show fraction.
@@ -1743,6 +1750,8 @@ function reassessLODs() {
   const vh = renderer.domElement.clientHeight || 1;
   const fovHalfTan = Math.tan((camera.fov * Math.PI / 180) / 2);
   const camX = camPos.x, camY = camPos.y, camZ = camPos.z;
+  let minDistThisPass = Infinity;
+  const revealFar = (isPresentingNow && revealMinDist != null) ? revealMinDist + REVEAL_BAND : Infinity;
 
   meshLoadingTotal = 0;
   meshLoadingDone = 0;
@@ -1797,6 +1806,10 @@ function reassessLODs() {
 
       const dx = px - camX, dy = py - camY, dz = pz - camZ;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (isPresentingNow) {
+        if (dist < minDistThisPass) minDistThisPass = dist;  // track nearest for next pass
+        if (dist > revealFar) continue;                       // depth-reveal: skip occluded interior
+      }
       const r = p.rotation || [1, 0, 0, 0];
       _tmpQuat.set(r[1], r[2], r[3], r[0]); // pack v1 stores [w,x,y,z]
       _tmpPos.set(px, py, pz);
@@ -1953,6 +1966,9 @@ function reassessLODs() {
       lvl0.wantPriority = -1;
     }
   }
+
+  // Remember the nearest visible molecule for next pass's depth-reveal window.
+  revealMinDist = (isPresentingNow && minDistThisPass < Infinity) ? minDistThisPass : null;
 
   // Hand off to the priority drain. It scans all entries' wantLoad
   // levels and picks the one whose closest in-frustum placement is
