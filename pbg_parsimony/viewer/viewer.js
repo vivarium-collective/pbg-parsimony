@@ -1570,7 +1570,10 @@ const VR_TARGET_DRAWN = 15000;  // lowered from 25k — headroom so the Quest ca
 // per-pixel pick — real molecular shapes at controlled GPU cost. 0 = lod0 (16 Å,
 // the coarsest/cheapest real mesh) so the most molecules fit under the triangle
 // budget below; falls back to a finer level only if lod0 is degenerate/missing.
-const VR_LOD_INDEX = 0;
+// In VR, never pick a level finer than necessary, but allow finer than this only
+// as the user approaches. This is the COARSEST level always acceptable; the
+// projected-size pick may choose finer (higher index) levels near the camera.
+const VR_LOD_FLOOR = 0;
 // Hard cap on triangles submitted per frame while presenting in VR. The scene is
 // drawn once per eye, so the GPU processes ~2× this. 600k → ~1.2M GPU triangles,
 // comfortable headroom on a Quest 2 so it cannot lock up. Bigger molecules claim
@@ -1815,15 +1818,15 @@ function reassessLODs() {
           if (!lods[i].degenerate) { desired = i; break; }
         }
       }
-      // VR: force a fixed coarse LOD (lod0/lod1 — cheapest real meshes) instead
-      // of the per-pixel pick, to keep the Quest GPU sane while still showing
-      // actual molecular shapes rather than smooth ellipsoids.
       if (isPresentingNow) {
-        desired = -1;
-        for (let i = Math.min(VR_LOD_INDEX, lods.length - 1); i >= 0; i--) {
-          if (!lods[i].degenerate) { desired = i; break; }
-        }
-        if (desired === -1) {
+        // Distance-aware in VR: keep the per-pixel `desired` chosen above, but
+        // clamp it no coarser than VR_LOD_FLOOR so far-away molecules still read
+        // as real (coarse) shapes rather than smooth eggs. The VR triangle budget
+        // below remains the hard cap on total geometry.
+        const floor = Math.min(VR_LOD_FLOOR, lods.length - 1);
+        if (desired < floor) desired = floor;
+        while (desired >= 0 && lods[desired].degenerate) desired--;
+        if (desired < 0) {
           for (let i = 0; i < lods.length; i++) if (!lods[i].degenerate) { desired = i; break; }
         }
       }
