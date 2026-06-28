@@ -1566,10 +1566,6 @@ if (IS_MOBILE) lodSphereBudgetPx = 6.0;
 // mesh-load churn stutters the whole runtime). Re-applied on VR enter/exit.
 const VR_TARGET_DRAWN = 15000;  // lowered from 25k — headroom so the Quest can't
                                 // GPU-lock (a lockup freezes even the Meta button)
-// In VR every drawn mesh ingredient uses this fixed (coarse) LOD instead of the
-// per-pixel pick — real molecular shapes at controlled GPU cost. 0 = lod0 (16 Å,
-// the coarsest/cheapest real mesh) so the most molecules fit under the triangle
-// budget below; falls back to a finer level only if lod0 is degenerate/missing.
 // In VR, never pick a level finer than necessary, but allow finer than this only
 // as the user approaches. This is the COARSEST level always acceptable; the
 // projected-size pick may choose finer (higher index) levels near the camera.
