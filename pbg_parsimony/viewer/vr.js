@@ -276,10 +276,11 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
     // black. Use metre-scale near/far in VR; restore on exit.
     camera.userData._nearBeforeVR = camera.near;
     camera.userData._farBeforeVR = camera.far;
-    // Near plane at 15 cm (not 2 cm): anything closer renders with extreme
+    // Near plane at 10 cm (not 2 cm): anything closer renders with extreme
     // binocular disparity the eyes can't fuse → double vision. Clipping that zone
-    // keeps stereo comfortable when molecules pass close while zoomed in.
-    camera.near = 0.15;
+    // keeps stereo comfortable when molecules pass close while zoomed in. (15 cm
+    // clipped too eagerly; 10 cm is the comfort-vs-reach balance.)
+    camera.near = 0.10;
     camera.far = 2000;
     camera.updateProjectionMatrix();
     dolly.scale.setScalar(WORLD_SCALE);
