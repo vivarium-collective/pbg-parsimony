@@ -421,16 +421,18 @@ export function initVR({ renderer, scene, camera, button, onEnter, onExit }) {
           dolly.position.add(_gShift);
           dolly.scale.setScalar(sNew);
         }
-        // …and yaw-rotate by the twist of the inter-hand vector about the world
-        // midpoint, so two hands can turn the cell (thumbstick snap-turn is dead
-        // on some controllers). World-space angle → no feedback on the dolly.
+        // …and yaw-rotate by the twist of the inter-hand vector, so two hands can
+        // turn the cell (thumbstick snap-turn is dead on some controllers).
+        // Pivot about the CELL CENTRE (world origin — the pack is centred there),
+        // NOT the hand midpoint: the hands are near the viewer while the cell is
+        // far, so a hand-midpoint pivot made the distant cell revolve around the
+        // user instead of spinning in place. World-space angle → no dolly feedback.
         a.getWorldPosition(_haW); b.getWorldPosition(_hbW);
         const ang = Math.atan2(_hbW.x - _haW.x, _hbW.z - _haW.z);
         let dAng = ang - _gPrevAngle;
         if (dAng > Math.PI) dAng -= 2 * Math.PI; else if (dAng < -Math.PI) dAng += 2 * Math.PI;
-        _haW.add(_hbW).multiplyScalar(0.5);   // world midpoint pivot
-        _q.setFromAxisAngle(_up, dAng);
-        dolly.position.sub(_haW).applyQuaternion(_q).add(_haW);
+        _q.setFromAxisAngle(_up, -dAng);      // camera counter-rotates → cell follows hands
+        dolly.position.applyQuaternion(_q);   // pivot = world origin (cell centre)
         dolly.quaternion.premultiply(_q);
         _gPrevAngle = ang;
         _gPrevMid.copy(_gMid);
