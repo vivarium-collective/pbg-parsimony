@@ -49,6 +49,12 @@ def author_recipe(name, objects, interior, surface, capsule, chromosome=None,
     if envelope is not None:
         o, i = envelope["outer"], envelope["inner"]
         oh, orad = float(o["half_len"]), float(o["radius"])
+        # Each membrane is a capsule, or a constricted MESH for a dividing cell
+        # (so both membranes neck at the septum).
+        outer_comp = ({"kind": "mesh", "mesh_path": o["mesh_path"]}
+                      if o.get("mesh_path") else _capsule(oh, orad))
+        inner_comp = ({"kind": "mesh", "mesh_path": i["mesh_path"]}
+                      if i.get("mesh_path") else _capsule(float(i["half_len"]), float(i["radius"])))
         recipe = {
             "name": name, "version": "0.1.0", "format_version": "2.1-parsimony",
             "description": "Gram-negative envelope packed by pbg-parsimony.",
@@ -58,11 +64,11 @@ def author_recipe(name, objects, interior, surface, capsule, chromosome=None,
             "composition": {
                 "space": {"regions": {"interior": ["cell"]}},
                 "cell": {  # outer membrane (surface) + periplasm (interior, minus the inner child)
-                    "compartment": _capsule(oh, orad),
+                    "compartment": outer_comp,
                     "regions": {"interior": ["cytoplasm"] + o["interior"], "surface": o["surface"]},
                 },
                 "cytoplasm": {  # inner membrane (surface) + cytoplasm (interior)
-                    "compartment": _capsule(float(i["half_len"]), float(i["radius"])),
+                    "compartment": inner_comp,
                     "regions": {"interior": i["interior"], "surface": i["surface"]},
                 },
             },
